@@ -23,3 +23,15 @@ def test_introspect_flags_a_module_resolving_outside_root(tmp_path):
 def test_introspect_reports_import_error_as_a_status(tmp_path):
     result = introspect(tmp_path, [{"id": "x", "op": "version", "module": "no_such_xyz"}])
     assert result["x"]["status"] == "error"
+
+
+def test_introspect_survives_a_package_that_prints_at_import(tmp_path):
+    # A package that writes to stdout on import must not corrupt the JSON result.
+    pkg = tmp_path / "demo_noisy"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text(
+        'print("chatter on import")\n__version__ = "1.2.3"\n', encoding="utf-8"
+    )
+    result = introspect(tmp_path, [{"id": "v", "op": "version", "module": "demo_noisy"}])
+    assert result["v"]["status"] == "ok"
+    assert result["v"]["version"] == "1.2.3"

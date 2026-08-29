@@ -30,7 +30,7 @@ class IntrospectError(Exception):
 # JSON object of results to stdout. It imports only the target package, never
 # shiplock, so there's no interference with the tool's own import state.
 _RUNNER = r'''
-import sys, json, os, importlib, inspect, enum
+import sys, json, os, io, importlib, inspect, enum
 
 request = json.load(sys.stdin)
 root = os.path.realpath(request["root"])
@@ -47,6 +47,11 @@ def under_root(module):
         return False
     return os.path.realpath(location).startswith(root + os.sep)
 
+
+# Anything an imported package prints must not reach the true stdout, where it
+# would corrupt the JSON result. Send it to a scratch buffer for the duration.
+_real_stdout = sys.stdout
+sys.stdout = io.StringIO()
 
 results = {}
 for query in request["queries"]:
@@ -92,6 +97,7 @@ for query in request["queries"]:
     except Exception as exc:
         results[qid] = {"status": "error", "error": type(exc).__name__ + ": " + str(exc)}
 
+sys.stdout = _real_stdout
 json.dump(results, sys.stdout)
 '''
 

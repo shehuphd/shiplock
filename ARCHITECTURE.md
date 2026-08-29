@@ -22,6 +22,8 @@ shiplock/
 ├── .github/
 │   ├── workflows/        # gate.yml (reusable), tests.yml, release-gate.yml
 │   └── dependabot.yml
+├── scripts/
+│   └── mutation_check.py # breaks each check to confirm its test guards it
 ├── shiplock.toml         # shiplock's own config (consumer zero)
 ├── pyproject.toml
 ├── README.md
@@ -100,7 +102,8 @@ CI lives in `.github/workflows/`:
   Code CLI and opens an issue on an `AUDIT: FAIL` verdict, failing closed when no
   verdict line is present. Any repo consumes it with
   `uses: shehuphd/shiplock/.github/workflows/gate.yml@main`.
-- `tests.yml` — the pytest suite across Python 3.10 through 3.13.
+- `tests.yml` — the pytest suite across Python 3.10 through 3.13, plus a
+  `mutation` job that runs `scripts/mutation_check.py`.
 - `release-gate.yml` — shiplock calling its own `gate.yml` over itself (consumer
   zero). Ship-inactive: `workflow_dispatch` only until a manual run passes, then
   the push and pull-request triggers get uncommented.
@@ -119,8 +122,10 @@ can't disturb the tool's own process or a caller's pytest session.
 
 Shiplock is consumer zero: its own `shiplock.toml` runs the checks over the
 shiplock repo, wired into the test suite so the gate runs with every test.
-Tests are adversarial-first (failing cases before happy paths) and mutation-
-checked (each check is deliberately broken to confirm its test fails).
+Tests are adversarial-first (failing cases before happy paths). A committed
+mutation check (`scripts/mutation_check.py`, run by the CI `mutation` job) breaks
+each check in turn and confirms its own test fails, so a test that guards nothing
+can't pass unnoticed.
 
 ## Future considerations
 

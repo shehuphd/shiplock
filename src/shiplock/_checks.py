@@ -50,7 +50,8 @@ def _read_text(path: Path) -> str | None:
             return path.read_bytes().decode("utf-8", errors="replace")
         except OSError:
             return None
-    except (FileNotFoundError, IsADirectoryError, PermissionError, OSError):
+    except OSError:
+        # Covers missing files, directories, and permission errors.
         return None
 
 
@@ -202,8 +203,8 @@ def check_version(config: Config) -> CheckResult:
     if status == "error":
         return [], [
             Notice(name, f"can't import '{package}' to read __version__ "
-            f"({result.get('error')}); install the package (pip install .) so the "
-            f"check can run")
+            f"({result.get('error')}); the check needs the package and its "
+            f"dependencies importable")
         ]
     if status != "ok":
         return [], [Notice(name, f"can't read '{package}' version ({status}); skipped")]
@@ -327,8 +328,8 @@ def _coverage_skip_reason(target: str, result: dict) -> str:
         )
     if status == "error":
         return (
-            f"can't resolve '{target}' ({result.get('error')}); install the package "
-            f"(pip install .) so the check can run"
+            f"can't resolve '{target}' ({result.get('error')}); the check needs the "
+            f"package and its dependencies importable"
         )
     reasons = {
         "no_all": f"'{target}' has no __all__; skipped",
