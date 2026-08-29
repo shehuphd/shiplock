@@ -15,6 +15,7 @@ shiplock/
 │   ├── _checks.py        # the eight checks and the runner
 │   ├── _report.py        # Finding, Notice, Report result types
 │   ├── _style.py         # the banned-word list and matcher
+│   ├── _introspect.py    # subprocess introspection bound to the checked root
 │   ├── py.typed          # PEP 561 marker
 │   └── prompts/
 │       └── audit.md      # the semantic audit prompt (shipped as package data)
@@ -56,6 +57,7 @@ shiplock check
 | `_checks` | Holds the eight check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
 | `_report` | Defines `Finding` (a disagreement), `Notice` (a skip with a reason), and `Report` (both, plus `ok`). |
 | `_style` | Defines the house banned-word list and the word-boundary matcher. Carved out of shiplock's own sweep, since it has to name the words. |
+| `_introspect` | Reads a package's `__version__`, `__all__`, enum members, and callable signatures in a subprocess that binds `sys.path` to the checked root, so `version` and `coverage` never read a stale installed copy. |
 
 ## The check registry
 
@@ -79,10 +81,12 @@ stdout and stderr.
 - **git** — `versioned-files` shells out to `git describe` and `git show` to
   compare a data file against its content at the last reachable tag. Absent git
   or absent tags produce a notice, not a failure.
-- **The consuming package** — `version` and `coverage` import the repo's own
-  package to read `__version__`, `__all__`, enum members, and callable
-  signatures. In CI the repo must be installed (`pip install .`) for these to
-  run; otherwise they skip with a notice naming the fix.
+- **The consuming package** — `version` and `coverage` read the repo's own
+  package (`__version__`, `__all__`, enum members, callable signatures) through
+  `_introspect`, which runs a subprocess with the checked root's source
+  prepended to `sys.path` and confirms the module resolved under root before
+  reading it. A target that resolves to a copy outside root, or won't import,
+  skips with a notice naming the fix rather than comparing the wrong code.
 
 ## Deployment
 
@@ -107,8 +111,9 @@ CI lives in `.github/workflows/`:
 
 Shiplock reads files and runs read-only git commands over a repo it's pointed
 at. It executes no code from the repo beyond importing the declared package for
-the `version` and `coverage` checks, which is the same import the repo's own
-test suite performs.
+the `version` and `coverage` checks — the same import the repo's own test suite
+performs — and that import runs in a separate subprocess (`_introspect`), so it
+can't disturb the tool's own process or a caller's pytest session.
 
 ## Development and testing
 

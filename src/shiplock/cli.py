@@ -86,7 +86,9 @@ def _cmd_check(root: Path) -> int:
 
 
 def _cmd_prompt() -> int:
-    text = files("shiplock.prompts").joinpath("audit.md").read_text(encoding="utf-8")
+    # Anchor on the shiplock package itself, not the prompts subdirectory, which
+    # has no __init__ and would otherwise rely on namespace-package resolution.
+    text = files("shiplock").joinpath("prompts", "audit.md").read_text(encoding="utf-8")
     # The prompt is content; print it verbatim without a trailing reformat.
     sys.stdout.write(text)
     if not text.endswith("\n"):
@@ -117,9 +119,9 @@ def _print_welcome() -> None:
     print(f"shiplock {__version__} — {_DESCRIPTION}")
     print()
     print("Try:")
-    print("  shiplock check           check the repo in the current directory")
-    print("  shiplock check --root .  check a repo elsewhere")
-    print("  shiplock prompt          print the semantic audit prompt")
+    print("  shiplock check                    check the current directory")
+    print("  shiplock check --root path/to/repo  check a repo elsewhere")
+    print("  shiplock prompt                   print the semantic audit prompt")
     print()
     print("Docs: https://github.com/shehuphd/shiplock")
 

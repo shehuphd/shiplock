@@ -1,5 +1,6 @@
 [build-system]
-requires = ["setuptools>=68"]
+# SPDX license expressions (license = "MIT") need setuptools 77.0.3 or newer.
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -38,7 +39,7 @@ shiplock = "shiplock.cli:main"
 
 [tool.pytest.ini_options]
 # Fail loudly if the randomizer isn't installed, rather than silently running
-# tests in a fixed order (CODING.md: enforce randomization, don't just enable it).
+# tests in a fixed order.
 required_plugins = ["pytest-randomly"]
 testpaths = ["tests"]
 

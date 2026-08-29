@@ -2,7 +2,7 @@ name: release gate
 
 # Shiplock as consumer zero: it runs its own reusable gate over itself.
 #
-# Ship-inactive (CODING.md): this starts as workflow_dispatch only. After one
+# Ship-inactive: this starts as workflow_dispatch only. After one
 # manual run passes green, uncomment the push/pull_request triggers below so the
 # gate runs on every push and PR to main.
 

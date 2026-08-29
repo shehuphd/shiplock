@@ -33,7 +33,7 @@ Work through these questions. Each one comes from a documented miss.
 3. **Re-derived enumerations.** Which doc sentences enumerate something the code
    also enumerates: providers, flags, error codes, tests in the release suite,
    commands? Re-derive each list from the code this session. A dated claim gets
-   refreshed by re-running the thing, not by inertia.
+   re-derived from the current source, not carried by inertia.
 
 4. **Counts.** Do counts stated in prose ("nine providers", "six checks") match
    a fresh count from the source of truth?
@@ -60,7 +60,7 @@ Report your findings as a list. For each, name the doc surface, the code fact it
 disagrees with, and the fix. Group nothing away; a skipped question is stated as
 skipped with its reason.
 
-End your output with a single verdict line on its own, one of exactly:
+End your output with a single verdict line on its own, one of:
 
     AUDIT: PASS
     AUDIT: FAIL

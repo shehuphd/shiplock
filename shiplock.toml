@@ -9,7 +9,7 @@ readme = "README.md"
 [style]
 extra_banned = []
 allow = []
-source_globs = ["src/**/*.py"]
+source_globs = ["src/**/*.py", "src/shiplock/prompts/*.md"]
 # The module defining the banned list is carved out of its own sweep.
 exclude = ["src/shiplock/_style.py"]
 

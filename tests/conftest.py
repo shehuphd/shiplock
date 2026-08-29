@@ -1,9 +1,9 @@
 """Shared fixtures and the per-run test artifact writer.
 
 Every run drops a sorted CSV of (nodeid, outcome, duration) under
-``.test-runs/`` (gitignored). Sorted so the file diffs cleanly across the
-randomized orders pytest-randomly produces, and so a run is inspectable after
-the fact rather than living only in scrollback.
+``.test-runs/`` (gitignored). Sorted so the file yields a stable diff across the
+randomized orders pytest-randomly emits, and so a run is inspectable after the
+fact rather than living only in scrollback.
 """
 
 from __future__ import annotations

@@ -33,59 +33,89 @@ Print the semantic audit prompt for a fresh agent:
 shiplock prompt
 ```
 
-## How it reads a repo
+## Setup
 
-Shiplock does nothing a repo hasn't declared. Every check reads its inputs from
-`shiplock.toml`; a check whose section is absent prints a skip notice and moves
-on. A skip is never a pass — the notice tells you the check didn't run, so an
-undeclared surface can't hide behind a clean result.
+Setup is one file: `shiplock.toml` at the repo root. Read this section once and
+you'll know what to put in it.
 
-## The config file
+### Two rules that make the rest obvious
 
-`shiplock.toml` lives at the repo root. Every section is optional. This is the
-complete schema:
+1. **Shiplock runs only the checks you configure.** Every section is optional and
+   independent. Declare a section and its check runs; leave it out and the check
+   prints a skip notice and moves on. A skip is never a pass — the notice says
+   plainly that the check didn't run, so an undeclared surface can't pass by
+   staying silent.
+
+2. **No file names are baked in.** The four-file doc set this project happens to
+   use (`README.md`, `USAGE.md`, `ARCHITECTURE.md`, `CHANGELOG.md`) is one team's
+   house convention, not a shiplock requirement. Shiplock requires none of them
+   by name. Declare the docs you ship, under the names you use, and configure
+   only the checks you want. A repo with just a `README.md` and no
+   architecture doc simply omits `[architecture]`, and the architecture check
+   skips.
+
+### Start with one section
+
+The smallest useful config checks a README for missing files and banned words:
 
 ```toml
 [docs]
-public = ["README.md", "USAGE.md", "ARCHITECTURE.md", "CHANGELOG.md"]
-changelog = "CHANGELOG.md"
-readme = "README.md"
-
-[style]
-extra_banned = []                 # words to add to the house list
-allow = []                        # house words to exempt in this repo
-source_globs = ["src/**/*.py"]    # shipped sources swept for banned words
-exclude = ["src/pkg/_words.py"]   # files carved out of the sweep
-
-[version]
-package = "pkg"                   # top-level import name
-
-[architecture]
-doc = "ARCHITECTURE.md"
-source_dir = "src/pkg"
-exempt = ["__init__"]
-
-[[coverage]]
-object = "pkg:ErrorCode"          # "module:Attr.path"; bare "module" for exports
-doc = "USAGE.md"
-kind = "enum"                     # enum | params | exports
-exempt = []
-
-[[versioned_files]]
-path = "src/pkg/data.json"
-pattern = '"data_version":\s*"([^"]+)"'   # one capture group
+public = ["README.md"]
 ```
 
-### Sections
+Run `shiplock check`: `docs-exist` and `banned-words` run over the README, and
+every other check prints a skip notice. Grow the file one section at a time as
+you want more coverage — nothing forces you to fill in the rest.
 
-| Section | Purpose |
-|---|---|
-| `[docs]` | The public docs. `public` lists them; `changelog` and `readme` name two of them for the checks that treat them specially. |
-| `[style]` | Banned-word sweep inputs: words to add or exempt, which sources to sweep, which files to leave out. |
-| `[version]` | The top-level import name, so the version check can read the package's `__version__`. |
-| `[architecture]` | The architecture doc and the source directory whose modules it must name. |
-| `[[coverage]]` | One entry per object whose members must appear in a doc. Repeatable. |
-| `[[versioned_files]]` | One entry per data file that must move a version marker when its content changes. Repeatable. |
+### What each section turns on
+
+| Section | Turns on | Leave it out and |
+|---|---|---|
+| `[docs]` `public` | `docs-exist`, `banned-words`, `internal-refs` over your docs | those three don't run |
+| `[docs]` `changelog` | changelog-aware banned-word scoping, and the changelog half of `version` | the changelog gets no special handling |
+| `[docs]` `readme` | `readme-links` | the absolute-link check doesn't run |
+| `[style]` | the source-code half of `banned-words` (`source_globs`) | only docs are swept, not source |
+| `[version]` | `version` (pyproject vs `__version__` vs changelog) | version alignment isn't checked |
+| `[architecture]` | `architecture` (every module named in the doc) | the module-list check doesn't run |
+| `[[coverage]]` | `coverage` — one entry per documented object, repeatable | object coverage isn't checked |
+| `[[versioned_files]]` | `versioned-files` — one entry per data file, repeatable | marker movement isn't checked |
+
+### The complete config, annotated
+
+Every section shiplock understands. Copy what you need and delete the rest:
+
+```toml
+[docs]
+# The docs shiplock treats as public. Name the files you ship — this
+# list is yours, not a fixed set.
+public = ["README.md", "USAGE.md", "ARCHITECTURE.md", "CHANGELOG.md"]
+changelog = "CHANGELOG.md"   # optional: enables changelog-aware checks
+readme = "README.md"         # optional: enables readme-links
+
+[style]                          # optional: omit to sweep docs only
+extra_banned = []                # add words to the house list
+allow = []                       # exempt house words in this repo
+source_globs = ["src/**/*.py"]   # shipped sources swept for banned words
+exclude = ["src/pkg/_words.py"]  # files carved out of the sweep
+
+[version]                    # optional: omit to skip version alignment
+package = "pkg"              # your top-level import name
+
+[architecture]              # optional: omit if you keep no architecture doc
+doc = "ARCHITECTURE.md"
+source_dir = "src/pkg"
+exempt = ["__init__"]        # module stems that need not be named in the doc
+
+[[coverage]]                 # optional, repeatable: one table per documented object
+object = "pkg:ErrorCode"     # "module:Attr.path", or a bare "module" for exports
+doc = "USAGE.md"
+kind = "enum"                # enum | params | exports
+exempt = []
+
+[[versioned_files]]          # optional, repeatable: one table per versioned data file
+path = "src/pkg/data.json"
+pattern = '"data_version":\s*"([^"]+)"'   # a regex with a single capture group
+```
 
 ## The checks
 
@@ -102,9 +132,15 @@ Eight deterministic checks, run in this order:
 | `coverage` | Every member of a declared object appears in its declared doc. Three kinds: `enum` (member names), `params` (a callable's parameter names), `exports` (a module's `__all__`). |
 | `versioned-files` | A declared data file whose content differs from the last reachable git tag has moved its version marker. |
 
+`version` and `coverage` learn about the code by introspecting the package in a
+subprocess with the checked root's source on `sys.path`, and confirm the module
+resolved under root before reading it — so they never compare against a stale
+copy installed elsewhere. The package must be importable (its dependencies
+present) for these two to run.
+
 When a check can't run — a source directory that isn't there, a package that
-won't import, no git tag to diff against — it prints a notice naming the reason
-and the fix, and the run continues.
+won't import or resolves outside the root, no git tag to diff against — it prints
+a notice naming the reason and the fix, and the run continues.
 
 ## Exit codes
 
@@ -159,8 +195,21 @@ jobs:
 The `check` job runs the deterministic checks on every push and pull request.
 The `audit` job runs the semantic layer through the Claude Code CLI and opens an
 issue if the audit returns `AUDIT: FAIL` (or produces no verdict line, which
-fails closed). Turn the audit off with `run-audit: false`; it needs the
-`ANTHROPIC_API_KEY` secret when on.
+fails closed).
+
+### The audit key
+
+The `audit` job calls the Claude API, so each consuming repo supplies its own
+key. The `check` job needs nothing. To enable the audit:
+
+1. Create an Anthropic API key at
+   [platform.claude.com/settings/keys](https://platform.claude.com/settings/keys).
+2. Add it to the consuming repo as a repository secret named `ANTHROPIC_API_KEY`,
+   at `https://github.com/<owner>/<repo>/settings/secrets/actions` → **New
+   repository secret**.
+
+Don't want the audit? Set `run-audit: false` and skip the key; the deterministic
+`check` job still runs.
 
 Wire it in dormant first: start with `on: workflow_dispatch`, run it once by
 hand, then switch to the push and pull-request triggers above once a manual run

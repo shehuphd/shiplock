@@ -108,6 +108,14 @@ def test_banned_words_honors_exclude_glob(tmp_path, write_file):
 # --- internal-refs --------------------------------------------------------
 
 
+def test_banned_words_scans_non_utf8_file_without_crashing(tmp_path):
+    # Invalid UTF-8 bytes must not raise; ASCII banned words still get caught.
+    (tmp_path / "README.md").write_bytes(b"\xff\xfe this is real\n")
+    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
+    findings, _ = check_banned_words(config)
+    assert any(f.message == "banned word 'real'" for f in findings)
+
+
 def test_internal_refs_fires_on_project_folder(tmp_path, write_file):
     write_file(tmp_path, "README.md", "see project/NOTES.md for details\n")
     config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
@@ -137,6 +145,22 @@ def test_internal_refs_fires_on_claude_dir(tmp_path, write_file):
     assert len(findings) == 1
 
 
+def test_internal_refs_ignores_claude_domain(tmp_path, write_file):
+    # "platform.claude.com" is a domain, not the .claude assistant directory.
+    write_file(tmp_path, "README.md", "get a key at platform.claude.com/keys\n")
+    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
+    findings, _ = check_internal_refs(config)
+    assert findings == []
+
+
+def test_internal_refs_ignores_coding_lookalike(tmp_path, write_file):
+    # "encoding.md" is not the coding-standards file.
+    write_file(tmp_path, "README.md", "see encoding.md for byte details\n")
+    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
+    findings, _ = check_internal_refs(config)
+    assert findings == []
+
+
 # --- readme-links ---------------------------------------------------------
 
 
@@ -156,6 +180,14 @@ def test_readme_links_accepts_absolute_and_anchor_and_mailto(tmp_path, write_fil
     config = Config(root=tmp_path, docs=DocsConfig(readme="README.md"))
     findings, _ = check_readme_links(config)
     assert findings == []
+
+
+def test_readme_links_tolerates_whitespace_target(tmp_path, write_file):
+    # A whitespace-only target must not crash the split; it's still a finding.
+    write_file(tmp_path, "README.md", "see [x](   ) here\n")
+    config = Config(root=tmp_path, docs=DocsConfig(readme="README.md"))
+    findings, _ = check_readme_links(config)
+    assert len(findings) == 1
 
 
 def test_readme_links_skips_without_readme(tmp_path):
@@ -205,6 +237,20 @@ def test_version_fires_on_changelog_without_heading(tmp_path, write_file, temp_m
     )
     findings, _ = check_version(config)
     assert any("no heading" in f.message for f in findings)
+
+
+def test_version_notice_when_package_resolves_outside_root(tmp_path, write_file):
+    # 'json' imports, but its source isn't under root: compare nothing, notice.
+    _write_pyproject(write_file, tmp_path, "1.0.0")
+    write_file(tmp_path, "CHANGELOG.md", "## [Unreleased]\n")
+    config = Config(
+        root=tmp_path,
+        docs=DocsConfig(changelog="CHANGELOG.md"),
+        version=VersionConfig(package="json"),
+    )
+    findings, notices = check_version(config)
+    assert findings == []
+    assert any("resolve to source under" in n.message for n in notices)
 
 
 def test_version_clean_when_aligned(tmp_path, write_file, temp_module):

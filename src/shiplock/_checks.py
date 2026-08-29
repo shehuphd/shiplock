@@ -9,9 +9,6 @@ missing (no git tag to diff against, an import that failed).
 
 from __future__ import annotations
 
-import enum
-import importlib
-import inspect
 import re
 import subprocess
 import sys
@@ -20,9 +17,9 @@ from pathlib import Path
 from shiplock import _style
 from shiplock._config import (
     Config,
-    CoverageEntry,
     VersionedFile,
 )
+from shiplock._introspect import IntrospectError, introspect
 from shiplock._report import Finding, Notice
 
 if sys.version_info >= (3, 11):
@@ -39,35 +36,27 @@ CheckResult = tuple[list[Finding], list[Notice]]
 
 
 def _read_text(path: Path) -> str | None:
-    """Read a file as UTF-8, or None if it isn't there."""
+    """Read a file as UTF-8, or None if it can't be read.
+
+    A file with invalid UTF-8 is still scanned, by decoding leniently: the
+    banned words and internal-ref patterns are ASCII, so a stray byte can't hide
+    a hit. A missing, directory, or permission-denied path returns None so the
+    caller skips it instead of surfacing a raw traceback.
+    """
     try:
         return path.read_text(encoding="utf-8")
-    except (FileNotFoundError, IsADirectoryError):
+    except UnicodeDecodeError:
+        try:
+            return path.read_bytes().decode("utf-8", errors="replace")
+        except OSError:
+            return None
+    except (FileNotFoundError, IsADirectoryError, PermissionError, OSError):
         return None
 
 
 def _mentions(text: str, name: str) -> bool:
     """True when ``name`` appears in ``text`` on a word boundary."""
     return re.search(rf"\b{re.escape(name)}\b", text) is not None
-
-
-class _ResolveError(Exception):
-    """A coverage target couldn't be imported or resolved."""
-
-
-def _resolve(target: str) -> object:
-    """Resolve a ``module:Attr.path`` (or bare ``module``) to an object."""
-    module_name, _, attr_path = target.partition(":")
-    try:
-        obj: object = importlib.import_module(module_name)
-    except ImportError as exc:
-        raise _ResolveError(f"can't import '{module_name}': {exc}") from exc
-    for part in filter(None, attr_path.split(".")):
-        try:
-            obj = getattr(obj, part)
-        except AttributeError as exc:
-            raise _ResolveError(f"'{target}' has no attribute '{part}'") from exc
-    return obj
 
 
 # --------------------------------------------------------------------------
@@ -162,7 +151,10 @@ def check_readme_links(config: Config) -> CheckResult:
     findings: list[Finding] = []
     for i, line in enumerate(text.splitlines(), start=1):
         for match in _MD_LINK.finditer(line):
-            target = match.group("target").split()[0] if match.group("target") else ""
+            # A link target may carry a title ("url \"text\""); take the first
+            # token, tolerating an empty or whitespace-only target.
+            parts = (match.group("target") or "").split()
+            target = parts[0] if parts else ""
             if not _is_absolute_link(target):
                 findings.append(
                     Finding(
@@ -197,17 +189,32 @@ def check_version(config: Config) -> CheckResult:
         return [], [Notice(name, "pyproject.toml has no [project].version; skipped")]
 
     try:
-        module = importlib.import_module(package)
-        dunder = getattr(module, "__version__")
-    except ImportError as exc:
-        return [], [
-            Notice(name, f"can't import '{package}' to read __version__ ({exc}); "
-            f"install the package (pip install .) so the check can run")
-        ]
-    except AttributeError:
-        return [], [Notice(name, f"'{package}' has no __version__; skipped")]
+        result = introspect(config.root, [{"id": "v", "op": "version", "module": package}])["v"]
+    except IntrospectError as exc:
+        return [], [Notice(name, f"couldn't introspect '{package}' ({exc}); skipped")]
 
-    if dunder != project_version:
+    status = result.get("status")
+    if status == "not_under_root":
+        return [], [
+            Notice(name, f"'{package}' didn't resolve to source under the checked "
+            f"root; install it (pip install .) or run from its repo root")
+        ]
+    if status == "error":
+        return [], [
+            Notice(name, f"can't import '{package}' to read __version__ "
+            f"({result.get('error')}); install the package (pip install .) so the "
+            f"check can run")
+        ]
+    if status != "ok":
+        return [], [Notice(name, f"can't read '{package}' version ({status}); skipped")]
+
+    dunder = result.get("version")
+    if dunder is None:
+        notices.append(
+            Notice(name, f"'{package}' has no __version__; the changelog heading is "
+            f"still checked")
+        )
+    elif dunder != project_version:
         findings.append(
             Finding(
                 name,
@@ -272,28 +279,30 @@ def check_coverage(config: Config) -> CheckResult:
     if not config.coverage:
         return [], [Notice(name, "no [[coverage]] entries declared; skipped")]
 
+    queries = [
+        {"id": str(i), "op": entry.kind, "target": entry.target}
+        for i, entry in enumerate(config.coverage)
+    ]
+    try:
+        results = introspect(config.root, queries)
+    except IntrospectError as exc:
+        return [], [Notice(name, f"couldn't introspect coverage targets ({exc}); skipped")]
+
     findings: list[Finding] = []
     notices: list[Notice] = []
-    for entry in config.coverage:
+    for i, entry in enumerate(config.coverage):
         text = _read_text(config.root / entry.doc)
         if text is None:
             notices.append(
                 Notice(name, f"{entry.doc} not found for '{entry.target}'; skipped")
             )
             continue
-        try:
-            members = _coverage_members(entry)
-        except _ResolveError as exc:
-            notices.append(
-                Notice(
-                    name,
-                    f"can't resolve '{entry.target}' ({exc}); install the package "
-                    f"(pip install .) so the check can run",
-                )
-            )
+        result = results.get(str(i), {"status": "error", "error": "no result"})
+        if result.get("status") != "ok":
+            notices.append(Notice(name, _coverage_skip_reason(entry.target, result)))
             continue
         exempt = set(entry.exempt)
-        for member in members:
+        for member in result.get("members", []):
             if member in exempt:
                 continue
             if not _mentions(text, member):
@@ -306,6 +315,28 @@ def check_coverage(config: Config) -> CheckResult:
                     )
                 )
     return findings, notices
+
+
+def _coverage_skip_reason(target: str, result: dict) -> str:
+    """Turn an introspection status into a plain-language skip message."""
+    status = result.get("status")
+    if status == "not_under_root":
+        return (
+            f"'{target}' didn't resolve to source under the checked root; install "
+            f"it (pip install .) or run from its repo root"
+        )
+    if status == "error":
+        return (
+            f"can't resolve '{target}' ({result.get('error')}); install the package "
+            f"(pip install .) so the check can run"
+        )
+    reasons = {
+        "no_all": f"'{target}' has no __all__; skipped",
+        "not_enum": f"'{target}' is not an Enum; skipped",
+        "not_callable": f"'{target}' is not callable; skipped",
+        "unknown_op": f"'{target}' has an unsupported coverage kind; skipped",
+    }
+    return reasons.get(status, f"can't read '{target}' ({status}); skipped")
 
 
 def check_versioned_files(config: Config) -> CheckResult:
@@ -393,11 +424,15 @@ def _changelog_covers(text: str, version: str) -> bool:
     return False
 
 
+# The lookbehinds keep each pattern matching the internal artifact and not a
+# lookalike: "pypi.org/project/" is a public URL, "encoding.md" isn't the
+# coding-standards file, and "platform.claude.com" is a domain, not the .claude
+# assistant directory.
 _INTERNAL_REF_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("project/", re.compile(r"(?<!pypi\.org/)\bproject/")),
-    ("CODING.md", re.compile(r"coding\.md", re.IGNORECASE)),
+    ("CODING.md", re.compile(r"(?<!\w)CODING\.md", re.IGNORECASE)),
     ("ROADMAP", re.compile(r"ROADMAP")),
-    (".claude", re.compile(r"\.claude\b")),
+    (".claude", re.compile(r"(?<![\w.])\.claude\b")),
 )
 
 
@@ -419,31 +454,6 @@ def _source_members(source_dir: Path) -> list[str]:
         elif child.is_dir() and (child / "__init__.py").is_file():
             members.add(child.name)
     return sorted(members)
-
-
-def _coverage_members(entry: CoverageEntry) -> list[str]:
-    """The member names a coverage entry requires to be documented."""
-    obj = _resolve(entry.target)
-    if entry.kind == "enum":
-        if not isinstance(obj, enum.EnumMeta):
-            raise _ResolveError(f"'{entry.target}' is not an Enum")
-        return [member.name for member in obj]  # type: ignore[union-attr]
-    if entry.kind == "exports":
-        dunder_all = getattr(obj, "__all__", None)
-        if dunder_all is None:
-            raise _ResolveError(f"'{entry.target}' has no __all__")
-        return list(dunder_all)
-    if entry.kind == "params":
-        if not callable(obj):
-            raise _ResolveError(f"'{entry.target}' is not callable")
-        skip = {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
-        names: list[str] = []
-        for param in inspect.signature(obj).parameters.values():
-            if param.name in ("self", "cls") or param.kind in skip:
-                continue
-            names.append(param.name)
-        return names
-    raise _ResolveError(f"unknown coverage kind '{entry.kind}'")
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:

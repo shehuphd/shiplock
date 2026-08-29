@@ -29,21 +29,37 @@ pip install shiplock
 
 ## See it work
 
-Add a `shiplock.toml` to your repo root declaring its doc surfaces (see
-[USAGE.md](https://github.com/shehuphd/shiplock/blob/main/USAGE.md) for the full
-schema), then run:
+Add a `shiplock.toml` to your repo root declaring what to check. Every section
+is optional, so start with the one doc you know you ship:
+
+```toml
+# shiplock.toml
+[docs]
+public = ["README.md"]
+```
+
+Then run:
 
 ```bash
 shiplock check
 ```
 
-Output on a repo whose README is missing a declared doc:
+That checks the README for existence and banned words; every other check skips
+with a notice until you declare its section. Grow the config as you want more
+coverage — the full schema, section by section, is in
+[USAGE.md](https://github.com/shehuphd/shiplock/blob/main/USAGE.md).
+
+Declare a doc you haven't written yet, and `shiplock check` reports it. Findings
+print to stdout, one per problem:
 
 ```
 docs-exist  USAGE.md
     declared public doc is missing: USAGE.md
-shiplock: 1 finding
 ```
+
+Notices for the checks you haven't configured yet, and the run summary
+(`shiplock: 1 finding`), print to stderr — so stdout stays clean for a pipe. The
+run exits 1.
 
 Exit code 0 means clean, 1 means a check found a problem, 2 means a config or
 usage error. That makes `shiplock check` a drop-in CI step and a pytest
