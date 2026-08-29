@@ -1,0 +1,22 @@
+# Internal planning: PRDs, design notes, roadmap, bug list.
+project/
+
+# Per-developer AI-assistant tool state.
+.claude/
+.codex/
+.grok/
+.cursor/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Per-run test artifact (a fresh CSV each run; scrollback is not a record).
+.test-runs/

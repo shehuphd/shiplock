@@ -1,0 +1,134 @@
+name: shiplock gate
+
+# Reusable release gate, consumed by any repo via:
+#
+#   jobs:
+#     gate:
+#       uses: shehuphd/shiplock/.github/workflows/gate.yml@main
+#       with:
+#         shiplock-spec: "shiplock"   # "." for shiplock's own repo
+#       secrets:
+#         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+#
+# Layer 1 (check) runs the deterministic checks. Layer 2 (audit) runs the
+# semantic audit through Claude Code and opens an issue on failure.
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: "Python version the checks run on"
+        type: string
+        default: "3.12"
+      shiplock-spec:
+        description: "pip requirement for shiplock itself (use '.' in shiplock's own repo)"
+        type: string
+        default: "shiplock"
+      run-audit:
+        description: "Run the Layer 2 semantic audit"
+        type: boolean
+        default: true
+      audit-model:
+        description: "Model for the semantic audit (alias or id; alias survives id churn)"
+        type: string
+        default: "sonnet"
+      audit-permission-mode:
+        description: "Claude Code permission mode for the read-only audit run"
+        type: string
+        default: "dontAsk"
+    secrets:
+      ANTHROPIC_API_KEY:
+        description: "API key for the Layer 2 audit; required only when run-audit is true"
+        required: false
+
+# Least privilege: no scopes at the top level; each job names what it needs.
+permissions: {}
+
+jobs:
+  check:
+    name: Deterministic checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Tags are needed for the versioned-files check to diff against the
+          # last reachable tag.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: Install shiplock and the repo
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "${{ inputs.shiplock-spec }}"
+          # The repo itself must be importable for the version and coverage checks.
+          python -m pip install .
+      - name: Run shiplock check
+        run: shiplock check
+
+  audit:
+    name: Semantic audit
+    needs: check
+    if: ${{ inputs.run-audit }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: Install shiplock
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "${{ inputs.shiplock-spec }}"
+          python -m pip install .
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Run the semantic audit
+        id: audit
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          shiplock prompt > audit-prompt.md
+          # Headless run: read-only tools only, no interactive prompt. The
+          # permission mode is the one knob confirmed on the first manual
+          # dispatch (Claude Code CLI, per its current headless docs).
+          claude -p "$(cat audit-prompt.md)" \
+            --model "${{ inputs.audit-model }}" \
+            --allowedTools "Read,Grep,Glob" \
+            --permission-mode "${{ inputs.audit-permission-mode }}" \
+            | tee audit-output.txt
+      - name: Act on the verdict
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          if [ ! -s audit-output.txt ]; then
+            echo "::error::the audit produced no output" >&2
+            exit 1
+          fi
+          verdict="$(grep -E '^AUDIT: (PASS|FAIL)' audit-output.txt | tail -1 || true)"
+          if echo "$verdict" | grep -q 'AUDIT: FAIL'; then
+            gh issue create \
+              --title "Shiplock audit failed on ${GITHUB_SHA::7}" \
+              --body-file audit-output.txt
+            echo "::error::semantic audit failed; opened an issue" >&2
+            exit 1
+          elif echo "$verdict" | grep -q 'AUDIT: PASS'; then
+            echo "semantic audit passed"
+          else
+            # No verdict line is not a pass. Fail closed.
+            echo "::error::no AUDIT verdict line found in the audit output" >&2
+            exit 1
+          fi

@@ -1,0 +1,131 @@
+# Architecture
+
+How shiplock is put together. The package is small and dependency-free by
+design: standard library only, with the `tomli` backport pulled in on Python
+3.10 alone.
+
+## Project structure
+
+```
+shiplock/
+├── src/shiplock/
+│   ├── __init__.py       # public API re-exports and __version__
+│   ├── cli.py            # command-line entry point (check, prompt)
+│   ├── _config.py        # shiplock.toml loader and typed config model
+│   ├── _checks.py        # the eight checks and the runner
+│   ├── _report.py        # Finding, Notice, Report result types
+│   ├── _style.py         # the banned-word list and matcher
+│   ├── py.typed          # PEP 561 marker
+│   └── prompts/
+│       └── audit.md      # the semantic audit prompt (shipped as package data)
+├── .github/
+│   ├── workflows/        # gate.yml (reusable), tests.yml, release-gate.yml
+│   └── dependabot.yml
+├── shiplock.toml         # shiplock's own config (consumer zero)
+├── pyproject.toml
+├── README.md
+├── USAGE.md
+├── ARCHITECTURE.md
+└── CHANGELOG.md
+```
+
+## High-level flow
+
+```
+shiplock check
+      │
+      ▼
+  cli.main ──► _config.load_config ──► Config
+      │                                   │
+      ▼                                   ▼
+  _checks.run_checks ───────────────► Report(findings, notices)
+      │                                   │
+      ▼                                   ▼
+  cli._render ──► stdout (findings) + stderr (notices, summary)
+      │
+      ▼
+   exit 0 / 1 / 2
+```
+
+## Core components
+
+| Module | Responsibility |
+|---|---|
+| `cli` | Parses arguments, dispatches `check` and `prompt`, renders the report, owns the exit-code contract. Greets a bare invocation. |
+| `_config` | Reads `shiplock.toml`, validates it, and returns a frozen `Config` of typed sections. Raises `ConfigError` on anything malformed. |
+| `_checks` | Holds the eight check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
+| `_report` | Defines `Finding` (a disagreement), `Notice` (a skip with a reason), and `Report` (both, plus `ok`). |
+| `_style` | Defines the house banned-word list and the word-boundary matcher. Carved out of shiplock's own sweep, since it has to name the words. |
+
+## The check registry
+
+`_checks._CHECKS` is a fixed tuple of check functions, each taking a `Config`
+and returning `(findings, notices)`. The order in that tuple is the order
+findings are reported in. Adding a check means adding a function and one tuple
+entry; nothing else in the runner changes.
+
+The eight checks: `docs-exist`, `banned-words`, `internal-refs`,
+`readme-links`, `version`, `architecture`, `coverage`, `versioned-files`. Each
+is documented in [USAGE.md](USAGE.md).
+
+## Data stores
+
+None. Shiplock holds no state between runs. It reads a repo's files and git
+metadata (via the `git` CLI, for the `versioned-files` check) and writes only to
+stdout and stderr.
+
+## External integrations
+
+- **git** — `versioned-files` shells out to `git describe` and `git show` to
+  compare a data file against its content at the last reachable tag. Absent git
+  or absent tags produce a notice, not a failure.
+- **The consuming package** — `version` and `coverage` import the repo's own
+  package to read `__version__`, `__all__`, enum members, and callable
+  signatures. In CI the repo must be installed (`pip install .`) for these to
+  run; otherwise they skip with a notice naming the fix.
+
+## Deployment
+
+Published to PyPI as `shiplock`, MIT-licensed. The package ships `py.typed` and
+`prompts/audit.md` as package data.
+
+CI lives in `.github/workflows/`:
+
+- `gate.yml` — the reusable gate (`on: workflow_call`). Job `check` runs the
+  deterministic checks; job `audit` runs the semantic layer through the Claude
+  Code CLI and opens an issue on an `AUDIT: FAIL` verdict, failing closed when no
+  verdict line is present. Any repo consumes it with
+  `uses: shehuphd/shiplock/.github/workflows/gate.yml@main`.
+- `tests.yml` — the pytest suite across Python 3.10 through 3.13.
+- `release-gate.yml` — shiplock calling its own `gate.yml` over itself (consumer
+  zero). Ship-inactive: `workflow_dispatch` only until a manual run passes, then
+  the push and pull-request triggers get uncommented.
+
+`dependabot.yml` keeps the action and pip versions current.
+
+## Security considerations
+
+Shiplock reads files and runs read-only git commands over a repo it's pointed
+at. It executes no code from the repo beyond importing the declared package for
+the `version` and `coverage` checks, which is the same import the repo's own
+test suite performs.
+
+## Development and testing
+
+Shiplock is consumer zero: its own `shiplock.toml` runs the checks over the
+shiplock repo, wired into the test suite so the gate runs with every test.
+Tests are adversarial-first (failing cases before happy paths) and mutation-
+checked (each check is deliberately broken to confirm its test fails).
+
+## Future considerations
+
+Known debt only, not a roadmap. The `internal-refs` pattern set is fixed; a repo
+with a differently-named internal folder would need the pattern list widened.
+
+## Glossary
+
+| Term | Meaning |
+|---|---|
+| Finding | A concrete disagreement between a doc and the code. Fails the run. |
+| Notice | A check that didn't run, with the reason stated. Doesn't fail the run. |
+| Consumer zero | Shiplock checking itself with the package it ships. |

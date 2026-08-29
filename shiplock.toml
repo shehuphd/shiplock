@@ -1,0 +1,28 @@
+# Shiplock's own release-gate config. Consumer zero: shiplock checks itself
+# with the same package every other repo consumes.
+
+[docs]
+public = ["README.md", "USAGE.md", "ARCHITECTURE.md", "CHANGELOG.md"]
+changelog = "CHANGELOG.md"
+readme = "README.md"
+
+[style]
+extra_banned = []
+allow = []
+source_globs = ["src/**/*.py"]
+# The module defining the banned list is carved out of its own sweep.
+exclude = ["src/shiplock/_style.py"]
+
+[version]
+package = "shiplock"
+
+[architecture]
+doc = "ARCHITECTURE.md"
+source_dir = "src/shiplock"
+exempt = ["__init__"]
+
+[[coverage]]
+object = "shiplock"
+doc = "USAGE.md"
+kind = "exports"
+exempt = ["__version__"]

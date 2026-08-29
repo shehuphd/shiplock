@@ -1,0 +1,29 @@
+name: release gate
+
+# Shiplock as consumer zero: it runs its own reusable gate over itself.
+#
+# Ship-inactive (CODING.md): this starts as workflow_dispatch only. After one
+# manual run passes green, uncomment the push/pull_request triggers below so the
+# gate runs on every push and PR to main.
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+  # pull_request:
+  #   branches: [main]
+
+# Ceiling for the reusable workflow's jobs: it needs to read the repo and open
+# an issue on an audit failure.
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  gate:
+    uses: ./.github/workflows/gate.yml
+    with:
+      shiplock-spec: "."   # install shiplock from this repo, not PyPI
+      run-audit: true
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
