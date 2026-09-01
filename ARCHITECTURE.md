@@ -111,6 +111,9 @@ CI lives in `.github/workflows/`:
 - `release-gate.yml` — shiplock calling its own `gate.yml` over itself (consumer
   zero). Ship-inactive: `workflow_dispatch` only until a manual run passes, then
   the push and pull-request triggers get uncommented.
+- `release.yml` — publishes to PyPI via trusted publishing (OIDC) when a GitHub
+  Release is published, behind the `release` environment's required-reviewer
+  approval.
 
 `dependabot.yml` keeps the action and pip versions current.
 
