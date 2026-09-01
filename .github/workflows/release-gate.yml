@@ -26,6 +26,9 @@ jobs:
       # semantic audit runs only on manual dispatch (the pre-release run).
       run-audit: ${{ github.event_name == 'workflow_dispatch' }}
       audit-model: "sonnet"
+      audit-fallback-model: "gpt-5.6-terra"
     secrets:
-      # Stored in the provider/key format the gate expects, e.g. anthropic/sk-ant-...
+      # Both stored in the provider/key format the gate expects,
+      # e.g. anthropic/sk-ant-... and openai/sk-...
       AUDIT_API_KEY: ${{ secrets.AUDIT_API_KEY }}
+      AUDIT_FALLBACK_API_KEY: ${{ secrets.AUDIT_FALLBACK_API_KEY }}
