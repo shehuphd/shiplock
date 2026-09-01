@@ -18,6 +18,12 @@ Read the code first and build your own list of what exists, then hold each doc
 up against that list. Never skim a doc for plausibility and move on; re-derive
 every enumeration from the source of truth.
 
+Gather in bulk: read whole files, several per tool call where the tools allow
+it, and prefer one broad pass over many small probes — every extra round trip
+re-sends the conversation so far, so a run with few large reads costs a fraction
+of one with many small ones. Front-load the reading, then reason over what you
+hold.
+
 Work through these questions. Each one comes from a documented miss.
 
 1. **Structure and antecedents.** After any insertion, move, or reorder, do the
