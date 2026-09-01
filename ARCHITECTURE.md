@@ -144,7 +144,10 @@ shiplock repo, wired into the test suite so the gate runs with every test.
 Tests are adversarial-first (failing cases before happy paths). A committed
 mutation check (`scripts/mutation_check.py`, run by the CI `mutation` job) breaks
 each check in turn and confirms its own test fails, so a test that guards nothing
-can't pass unnoticed.
+can't pass unnoticed. The gate workflow's shell orchestration is tested too:
+`tests/test_gate.py` extracts the audit job's step scripts from `gate.yml`
+itself and runs them against stub agent CLIs, covering key validation, the
+missing-key skip, and the cross-provider failover continuation.
 
 ## Future considerations
 
