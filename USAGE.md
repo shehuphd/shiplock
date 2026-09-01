@@ -178,9 +178,21 @@ resolved under root before reading it — so they never compare against a stale
 copy installed elsewhere. The package must be importable (its dependencies
 present) for these two to run.
 
-When a check can't run — a source directory that isn't there, a package that
-won't import or resolves outside the root, no git tag to diff against — it prints
-a notice naming the reason and the fix, and the run continues.
+When introspection can't answer, it comes back with a status naming why, and
+the check turns that into a notice instead of a finding:
+
+| Status | Meaning | Which check |
+|---|---|---|
+| `not_under_root` | The target resolved to source outside the checked root (a stale installed copy) | `version`, `coverage` |
+| `error` | Importing or reading the target raised an exception | `version`, `coverage` |
+| `no_all` | An `exports` target has no `__all__` | `coverage` |
+| `not_enum` | An `enum` target isn't an `Enum` | `coverage` |
+| `not_callable` | A `params` target isn't callable | `coverage` |
+| `unknown_op` | The `[[coverage]]` entry's `kind` isn't one of `enum`, `params`, `exports` | `coverage` |
+
+When a check can't run for a reason outside introspection — a source directory
+that isn't there, no git tag to diff against — it prints a notice naming the
+reason and the fix, and the run continues either way.
 
 ## Exit codes
 
