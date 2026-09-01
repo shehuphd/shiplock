@@ -1,6 +1,6 @@
 # Manifest
 
-Last updated: 2026-09-01 11:19:46 UTC
+Last updated: 2026-09-01 11:37:28 UTC
 
 Every current source file, what it does, and what it touches. A map for a
 reader orienting in the codebase, kept current in the same change that adds,
@@ -38,7 +38,7 @@ removes, renames, or repurposes a file.
 |---|---|
 | `scripts/mutation_check.py` | Breaks each check in turn and requires its own test to fail; restores sources in a finally block. Run by the CI `mutation` job. |
 | `.github/workflows/gate.yml` | Reusable release gate (`workflow_call`): `check` job runs the deterministic checks, `audit` job runs the semantic audit through the Claude Code CLI and opens an issue on failure. |
-| `.github/workflows/tests.yml` | Pytest across Python 3.10–3.13 plus the `mutation` job, on push and PR to main. |
+| `.github/workflows/tests.yml` | Pytest across Python 3.10–3.13 plus the `mutation` job, on push and PR to main and by manual dispatch. |
 | `.github/workflows/release-gate.yml` | Shiplock consuming its own `gate.yml` (consumer zero); `workflow_dispatch` only until a manual run passes. |
 | `.github/workflows/release.yml` | Publishes to PyPI via trusted publishing when a GitHub Release is published; waits on the `release` environment's required-reviewer approval. |
 | `.github/dependabot.yml` | Weekly `github-actions` and `pip` version updates. |
@@ -48,7 +48,7 @@ removes, renames, or repurposes a file.
 | File | What it does |
 |---|---|
 | `pyproject.toml` | Package metadata, build config, test extras, pytest options. |
-| `shiplock.toml` | Shiplock's own gate config: doc surfaces, sweep globs, version package, architecture doc, coverage entries. |
+| `shiplock.toml` | Shiplock's own gate config: doc surfaces, sweep globs, version package, architecture doc, manifest sources, coverage entries. |
 | `MANIFEST.in` | Prunes `tests/` from the sdist; the suite runs from the repo. |
 | `.gitignore` | Excludes the internal planning folder, assistant tool directories, the venv, build artifacts, and the per-run test CSVs. |
 | `README.md` / `USAGE.md` / `ARCHITECTURE.md` / `CHANGELOG.md` | Public docs: quick start, full manual, structure and components, release history. |

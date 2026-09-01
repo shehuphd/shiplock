@@ -191,6 +191,12 @@ Findings print to stdout; notices and the summary print to stderr, so stdout
 stays clean for a pipe. This makes `shiplock check` both a CI step and a pytest
 assertion.
 
+On a terminal, findings and the failing summary render red and a clean summary
+renders green; piped output carries no escape codes, and setting the `NO_COLOR`
+environment variable turns color off everywhere. Usage mistakes get a sentence,
+not a parser dump: a mistyped command is answered with the valid commands and,
+when one is close enough, a "Perhaps you meant" suggestion.
+
 ## The semantic audit
 
 `shiplock check` covers what a machine can decide with certainty. The second

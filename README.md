@@ -49,7 +49,9 @@ Findings print to stdout; notices for the checks that need configuration, and
 the run summary, print to stderr — so stdout stays clean for a pipe. Exit code 0
 means clean, 1 means a check found a problem, 2 means a config or usage error.
 That makes `shiplock check` a drop-in CI step and a pytest assertion alike.
-`--json` swaps the human output for one machine-readable object.
+`--json` swaps the human output for one machine-readable object. On a terminal,
+findings render red and a clean run green (`NO_COLOR` turns that off); piped
+output stays plain.
 
 When you want the rest of the checks — version alignment, architecture and
 manifest coverage, object documentation, versioned-file markers — add a

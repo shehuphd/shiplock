@@ -18,6 +18,11 @@ semantic versioning.
   by a machine-greppable `AUDIT: PASS` / `AUDIT: FAIL` verdict line.
 - A Python API: `load_config`, `run_checks`, and the `Config`, `Report`,
   `Finding`, `Notice`, and `ConfigError` types.
+- Plain-sentence CLI errors with a fuzzy suggestion for a mistyped command, and
+  category color on a terminal (findings red, clean green), off when piped or
+  under `NO_COLOR`.
+- A mutation check (`scripts/mutation_check.py`, run as a CI job) that breaks
+  each check in turn and requires its own test to fail.
 - A reusable GitHub Actions workflow (`gate.yml`, `on: workflow_call`) that runs
   both layers in CI and opens an issue on an audit failure.
 - A PyPI release workflow (`release.yml`) publishing via trusted publishing when
