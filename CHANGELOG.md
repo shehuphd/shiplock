@@ -35,4 +35,4 @@ semantic versioning.
   a GitHub Release is published, behind a reviewer-gated environment.
 - Shiplock as consumer zero: its own `shiplock.toml`, run over the shiplock repo.
 
-[Unreleased]: https://github.com/shehuphd/shiplock
+[0.0.1]: https://github.com/shehuphd/shiplock/releases/tag/v0.0.1
