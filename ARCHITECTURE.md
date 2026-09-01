@@ -12,7 +12,7 @@ shiplock/
 │   ├── __init__.py       # public API re-exports and __version__
 │   ├── cli.py            # command-line entry point (check, prompt)
 │   ├── _config.py        # shiplock.toml loader and typed config model
-│   ├── _checks.py        # the eight checks and the runner
+│   ├── _checks.py        # the nine checks and the runner
 │   ├── _report.py        # Finding, Notice, Report result types
 │   ├── _style.py         # the banned-word list and matcher
 │   ├── _introspect.py    # subprocess introspection bound to the checked root
@@ -26,6 +26,8 @@ shiplock/
 │   └── mutation_check.py # breaks each check to confirm its test guards it
 ├── shiplock.toml         # shiplock's own config (consumer zero)
 ├── pyproject.toml
+├── MANIFEST.in           # prunes tests/ from the sdist
+├── MANIFEST.md           # per-file map of the codebase
 ├── README.md
 ├── USAGE.md
 ├── ARCHITECTURE.md
@@ -56,7 +58,7 @@ shiplock check
 |---|---|
 | `cli` | Parses arguments, dispatches `check` and `prompt`, renders the report, owns the exit-code contract. Greets a bare invocation. |
 | `_config` | Reads `shiplock.toml`, validates it, and returns a frozen `Config` of typed sections. Raises `ConfigError` on anything malformed. |
-| `_checks` | Holds the eight check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
+| `_checks` | Holds the nine check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
 | `_report` | Defines `Finding` (a disagreement), `Notice` (a skip with a reason), and `Report` (both, plus `ok`). |
 | `_style` | Defines the house banned-word list and the word-boundary matcher. Carved out of shiplock's own sweep, since it has to name the words. |
 | `_introspect` | Reads a package's `__version__`, `__all__`, enum members, and callable signatures in a subprocess that binds `sys.path` to the checked root, so `version` and `coverage` never read a stale installed copy. |
@@ -68,9 +70,9 @@ and returning `(findings, notices)`. The order in that tuple is the order
 findings are reported in. Adding a check means adding a function and one tuple
 entry; nothing else in the runner changes.
 
-The eight checks: `docs-exist`, `banned-words`, `internal-refs`,
-`readme-links`, `version`, `architecture`, `coverage`, `versioned-files`. Each
-is documented in [USAGE.md](USAGE.md).
+The nine checks: `docs-exist`, `banned-words`, `internal-refs`,
+`readme-links`, `version`, `architecture`, `coverage`, `manifest`,
+`versioned-files`. Each is documented in [USAGE.md](USAGE.md).
 
 ## Data stores
 
@@ -81,8 +83,10 @@ stdout and stderr.
 ## External integrations
 
 - **git** — `versioned-files` shells out to `git describe` and `git show` to
-  compare a data file against its content at the last reachable tag. Absent git
-  or absent tags produce a notice, not a failure.
+  compare a data file against its content at the last reachable tag, and
+  `manifest` uses `git diff` against the same tag to see whether sources moved
+  without the manifest. Absent git or absent tags produce a notice, not a
+  failure.
 - **The consuming package** — `version` and `coverage` read the repo's own
   package (`__version__`, `__all__`, enum members, callable signatures) through
   `_introspect`, which runs a subprocess with the checked root's source

@@ -61,6 +61,16 @@ class ArchitectureConfig:
 
 
 @dataclass(frozen=True)
+class ManifestConfig:
+    # doc declared -> the manifest check runs in full. No doc and remind False
+    # -> the missing-manifest reminder is silenced.
+    doc: str | None = None
+    sources: list[str] = field(default_factory=list)
+    exempt: list[str] = field(default_factory=list)
+    remind: bool = True
+
+
+@dataclass(frozen=True)
 class CoverageEntry:
     # ``target`` holds the TOML ``object`` key; renamed to avoid shadowing the
     # builtin. Format: "module:Attr.path", or a bare "module" for exports.
@@ -85,8 +95,39 @@ class Config:
     style: StyleConfig | None = None
     version: VersionConfig | None = None
     architecture: ArchitectureConfig | None = None
+    manifest: ManifestConfig | None = None
     coverage: list[CoverageEntry] = field(default_factory=list)
     versioned_files: list[VersionedFile] = field(default_factory=list)
+
+
+_DEFAULT_DOC_NAMES = (
+    "README.md",
+    "USAGE.md",
+    "ARCHITECTURE.md",
+    "CHANGELOG.md",
+    "MANIFEST.md",
+    "CONTRIBUTING.md",
+)
+
+
+def default_config(root: Path) -> Config:
+    """A config for a repo with no ``shiplock.toml``: check what's detectable.
+
+    The recognized doc names that exist at ``root`` become the public docs, the
+    README and changelog get their special handling when present, and every
+    check that needs a declaration skips with its usual notice. This is what
+    lets ``shiplock check path/to/repo`` do something useful with no setup.
+    """
+    root = root.resolve()
+    present = [name for name in _DEFAULT_DOC_NAMES if (root / name).is_file()]
+    return Config(
+        root=root,
+        docs=DocsConfig(
+            public=present,
+            changelog="CHANGELOG.md" if "CHANGELOG.md" in present else None,
+            readme="README.md" if "README.md" in present else None,
+        ),
+    )
 
 
 def load_config(root: Path) -> Config:
@@ -99,9 +140,9 @@ def load_config(root: Path) -> Config:
     path = root / CONFIG_FILENAME
     if not path.is_file():
         raise ConfigError(
-            f"No {CONFIG_FILENAME} found in {root}. "
-            f"Create one declaring this repo's doc surfaces, or run shiplock "
-            f"from the repo root with --root."
+            f"No {CONFIG_FILENAME} found in {root}. Create one declaring this "
+            f"repo's doc surfaces, or point shiplock at the directory that "
+            f"holds it."
         )
 
     try:
@@ -121,6 +162,7 @@ def _parse(root: Path, raw: dict) -> Config:
         "style",
         "version",
         "architecture",
+        "manifest",
         "coverage",
         "versioned_files",
     }
@@ -138,6 +180,7 @@ def _parse(root: Path, raw: dict) -> Config:
         style=_parse_style(raw.get("style")),
         version=_parse_version(raw.get("version")),
         architecture=_parse_architecture(raw.get("architecture")),
+        manifest=_parse_manifest(raw.get("manifest")),
         coverage=_parse_coverage(raw.get("coverage")),
         versioned_files=_parse_versioned_files(raw.get("versioned_files")),
     )
@@ -203,6 +246,30 @@ def _parse_architecture(section: object) -> ArchitectureConfig | None:
         doc=_require_str(section["doc"], "[architecture].doc"),
         source_dir=_require_str(section["source_dir"], "[architecture].source_dir"),
         exempt=_require_str_list(section.get("exempt", []), "[architecture].exempt"),
+    )
+
+
+def _parse_manifest(section: object) -> ManifestConfig | None:
+    if section is None:
+        return None
+    if not isinstance(section, dict):
+        raise ConfigError("[manifest] must be a table.")
+    doc = _opt_str(section.get("doc"), "[manifest].doc")
+    remind = section.get("remind", True)
+    if not isinstance(remind, bool):
+        raise ConfigError("[manifest].remind must be a boolean.")
+    if doc is not None and remind is False:
+        raise ConfigError(
+            "[manifest].remind only applies when no manifest is declared; "
+            "remove 'remind' or remove 'doc'."
+        )
+    if doc is None and (section.get("sources") or section.get("exempt")):
+        raise ConfigError("[manifest].sources and .exempt require 'doc'.")
+    return ManifestConfig(
+        doc=doc,
+        sources=_require_str_list(section.get("sources", []), "[manifest].sources"),
+        exempt=_require_str_list(section.get("exempt", []), "[manifest].exempt"),
+        remind=remind,
     )
 
 

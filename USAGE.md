@@ -15,16 +15,25 @@ library yet).
 
 ## Quick start
 
-Add a `shiplock.toml` to your repo root, then run the checks:
+Point the checks at any repo — no config needed:
 
 ```bash
-shiplock check
+shiplock check path/to/repo
 ```
 
-Point it at a repo elsewhere with `--root`:
+The path can be relative or absolute, and defaults to the current directory
+(`shiplock check` inside a repo). With no `shiplock.toml` present, shiplock runs
+its default pass: the docs it recognizes by name (`README.md`, `USAGE.md`,
+`ARCHITECTURE.md`, `CHANGELOG.md`, `MANIFEST.md`, `CONTRIBUTING.md` — whichever
+exist) get swept for missing files, banned words, internal references, and
+relative README links, and a note on stderr says the run used defaults. The
+checks that need declarations skip with a notice each.
+
+Add `--json` for one machine-readable object on stdout instead of the human
+rendering:
 
 ```bash
-shiplock check --root ../some-other-repo
+shiplock check path/to/repo --json
 ```
 
 Print the semantic audit prompt for a fresh agent:
@@ -35,8 +44,11 @@ shiplock prompt
 
 ## Setup
 
-Setup is one file: `shiplock.toml` at the repo root. Read this section once and
-you'll know what to put in it.
+Configuration is one file: `shiplock.toml` at the repo root. The default run
+above needs none of it; the config unlocks the checks that can't guess their
+inputs — version alignment, the architecture and manifest maps, object coverage,
+versioned-file markers — and lets you name your own doc set. Read this section
+once and you'll know what to put in it.
 
 ### Two rules that make the rest obvious
 
@@ -44,19 +56,19 @@ you'll know what to put in it.
    independent. Declare a section and its check runs; leave it out and the check
    prints a skip notice and moves on. A skip is never a pass — the notice says
    plainly that the check didn't run, so an undeclared surface can't pass by
-   staying silent.
+   staying silent. (The zero-config default run is the one exception, and it says
+   so on stderr when it happens.)
 
-2. **No file names are baked in.** The four-file doc set this project happens to
-   use (`README.md`, `USAGE.md`, `ARCHITECTURE.md`, `CHANGELOG.md`) is one team's
-   house convention, not a shiplock requirement. Shiplock requires none of them
-   by name. Declare the docs you ship, under the names you use, and configure
-   only the checks you want. A repo with just a `README.md` and no
-   architecture doc simply omits `[architecture]`, and the architecture check
-   skips.
+2. **No file names are baked in.** The doc set this project happens to use is one
+   team's house convention, not a shiplock requirement. The default run detects
+   common names as a convenience; a `shiplock.toml` replaces that guess entirely.
+   Declare the docs you ship, under the names you use, and configure only the
+   checks you want. A repo with just a `README.md` and no architecture doc simply
+   omits `[architecture]`, and the architecture check skips.
 
 ### Start with one section
 
-The smallest useful config checks a README for missing files and banned words:
+The smallest config checks a README for missing files and banned words:
 
 ```toml
 [docs]
@@ -77,6 +89,7 @@ you want more coverage — nothing forces you to fill in the rest.
 | `[style]` | the source-code half of `banned-words` (`source_globs`) | only docs are swept, not source |
 | `[version]` | `version` (pyproject vs `__version__` vs changelog) | version alignment isn't checked |
 | `[architecture]` | `architecture` (every module named in the doc) | the module-list check doesn't run |
+| `[manifest]` | `manifest` (the per-file map exists, lists every source file, and moves with them) | a reminder notice suggests keeping one; `remind = false` silences it |
 | `[[coverage]]` | `coverage` — one entry per documented object, repeatable | object coverage isn't checked |
 | `[[versioned_files]]` | `versioned-files` — one entry per data file, repeatable | marker movement isn't checked |
 
@@ -106,6 +119,14 @@ doc = "ARCHITECTURE.md"
 source_dir = "src/pkg"
 exempt = ["__init__"]        # module stems that need not be named in the doc
 
+[manifest]                   # optional: omit for a reminder, declare to check
+doc = "MANIFEST.md"
+sources = ["src/**/*.py"]    # files the manifest must list
+exempt = []
+# Or, to silence the reminder in a repo that keeps no manifest:
+# [manifest]
+# remind = false
+
 [[coverage]]                 # optional, repeatable: one table per documented object
 object = "pkg:ErrorCode"     # "module:Attr.path", or a bare "module" for exports
 doc = "USAGE.md"
@@ -119,7 +140,7 @@ pattern = '"data_version":\s*"([^"]+)"'   # a regex with a single capture group
 
 ## The checks
 
-Eight deterministic checks, run in this order:
+Nine deterministic checks, run in this order:
 
 | Check | Asserts |
 |---|---|
@@ -130,7 +151,23 @@ Eight deterministic checks, run in this order:
 | `version` | The pyproject version equals the package's `__version__`, and the changelog carries a heading for that version or an `[Unreleased]` section. |
 | `architecture` | Every top-level module and subpackage under the source directory is named in the architecture doc, or listed as exempt. |
 | `coverage` | Every member of a declared object appears in its declared doc. Three kinds: `enum` (member names), `params` (a callable's parameter names), `exports` (a module's `__all__`). |
+| `manifest` | The per-file manifest exists, carries a `Last updated:` line, lists every source file matched by its globs (by path or file name), and changed whenever the sources changed since the last git tag. With no `[manifest]` declared, the check prints a reminder notice instead — see below. |
 | `versioned-files` | A declared data file whose content differs from the last reachable git tag has moved its version marker. |
+
+### The manifest reminder
+
+A per-file manifest (a `MANIFEST.md` mapping each source file to what it does)
+gives readers a file index without opening the code. It's optional: with no
+`[manifest]` section, `shiplock check` prints a notice suggesting one — generate
+it by hand or with an AI tool, then declare it to keep it checked. A repo that
+keeps no manifest silences the reminder for good with:
+
+```toml
+[manifest]
+remind = false
+```
+
+The reminder is a notice, so it never fails a run either way.
 
 `version` and `coverage` learn about the code by introspecting the package in a
 subprocess with the checked root's source on `sys.path`, and confirm the module

@@ -49,6 +49,20 @@ def test_architecture_requires_both_keys(tmp_path, write_file):
         load_config(tmp_path)
 
 
+def test_manifest_remind_with_doc_raises(tmp_path, write_file):
+    write_file(
+        tmp_path, "shiplock.toml", '[manifest]\ndoc = "MANIFEST.md"\nremind = false\n'
+    )
+    with pytest.raises(ConfigError, match="remind only applies"):
+        load_config(tmp_path)
+
+
+def test_manifest_sources_without_doc_raises(tmp_path, write_file):
+    write_file(tmp_path, "shiplock.toml", '[manifest]\nsources = ["src/**/*.py"]\n')
+    with pytest.raises(ConfigError, match="require 'doc'"):
+        load_config(tmp_path)
+
+
 # --- a valid file parses ---------------------------------------------------
 
 

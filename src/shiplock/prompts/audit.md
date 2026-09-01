@@ -54,6 +54,13 @@ Work through these questions. Each one comes from a documented miss.
 8. **Test-suite coverage of claims.** Does the release-gate test suite cover
    every capability the docs claim, and where it doesn't, do the docs say so?
 
+9. **The per-file manifest, where the repo keeps one.** If the repo carries a
+   manifest mapping each source file to what it does, is every description still
+   true of the file as it now reads — right responsibilities, right resources
+   touched? A deterministic check can confirm a file is listed; only reading the
+   file can confirm the description hasn't rotted. When the repo keeps no
+   manifest, skip this question and say so.
+
 ## Output
 
 Report your findings as a list. For each, name the doc surface, the code fact it

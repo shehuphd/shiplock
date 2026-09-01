@@ -14,6 +14,7 @@ from shiplock._checks import (
     check_coverage,
     check_docs_exist,
     check_internal_refs,
+    check_manifest,
     check_readme_links,
     check_version,
     check_versioned_files,
@@ -23,6 +24,7 @@ from shiplock._config import (
     Config,
     CoverageEntry,
     DocsConfig,
+    ManifestConfig,
     StyleConfig,
     VersionConfig,
     VersionedFile,
@@ -347,6 +349,96 @@ def test_coverage_clean_when_all_documented(tmp_path, write_file, temp_module):
     assert findings == []
 
 
+# --- manifest -------------------------------------------------------------
+
+
+_MANIFEST_TEXT = "# Manifest\n\nLast updated: 2026-09-01 00:00:00 UTC\n\n| core.py | logic |\n"
+
+
+def test_manifest_reminds_when_no_manifest_exists(tmp_path):
+    findings, notices = check_manifest(Config(root=tmp_path))
+    assert findings == []
+    assert any("remind = false" in n.message for n in notices)
+
+
+def test_manifest_reminds_when_undeclared_but_present(tmp_path, write_file):
+    write_file(tmp_path, "MANIFEST.md", _MANIFEST_TEXT)
+    findings, notices = check_manifest(Config(root=tmp_path))
+    assert findings == []
+    assert any("isn't declared" in n.message for n in notices)
+
+
+def test_manifest_reminder_can_be_silenced(tmp_path):
+    config = Config(root=tmp_path, manifest=ManifestConfig(remind=False))
+    findings, notices = check_manifest(config)
+    assert findings == []
+    assert notices == []
+
+
+def test_manifest_fires_when_declared_doc_missing(tmp_path):
+    config = Config(root=tmp_path, manifest=ManifestConfig(doc="MANIFEST.md"))
+    findings, _ = check_manifest(config)
+    assert any("missing" in f.message for f in findings)
+
+
+def test_manifest_fires_without_last_updated_line(tmp_path, write_file):
+    write_file(tmp_path, "MANIFEST.md", "# Manifest\n\n| core.py | logic |\n")
+    config = Config(root=tmp_path, manifest=ManifestConfig(doc="MANIFEST.md"))
+    findings, _ = check_manifest(config)
+    assert any("Last updated" in f.message for f in findings)
+
+
+def test_manifest_fires_on_unlisted_source_file(tmp_path, write_file):
+    write_file(tmp_path, "MANIFEST.md", _MANIFEST_TEXT)
+    write_file(tmp_path, "src/pkg/core.py", "x = 1\n")
+    write_file(tmp_path, "src/pkg/extra.py", "y = 2\n")
+    config = Config(
+        root=tmp_path,
+        manifest=ManifestConfig(doc="MANIFEST.md", sources=["src/**/*.py"]),
+    )
+    findings, _ = check_manifest(config)
+    assert any("extra.py" in f.message for f in findings)
+    assert not any("core.py" in f.message for f in findings)
+
+
+def test_manifest_clean_when_all_listed(tmp_path, write_file):
+    write_file(tmp_path, "MANIFEST.md", _MANIFEST_TEXT)
+    write_file(tmp_path, "src/pkg/core.py", "x = 1\n")
+    config = Config(
+        root=tmp_path,
+        manifest=ManifestConfig(doc="MANIFEST.md", sources=["src/**/*.py"]),
+    )
+    findings, _ = check_manifest(config)
+    assert findings == []
+
+
+def test_manifest_fires_when_sources_moved_without_it(git_repo, write_file):
+    write_file(git_repo, "MANIFEST.md", _MANIFEST_TEXT)
+    write_file(git_repo, "src/pkg/core.py", "x = 1\n")
+    _commit_and_tag(git_repo, "v1.0.0")
+    write_file(git_repo, "src/pkg/core.py", "x = 2\n")  # source moved, manifest not
+    config = Config(
+        root=git_repo,
+        manifest=ManifestConfig(doc="MANIFEST.md", sources=["src/**/*.py"]),
+    )
+    findings, _ = check_manifest(config)
+    assert any("didn't" in f.message for f in findings)
+
+
+def test_manifest_clean_when_it_moved_with_sources(git_repo, write_file):
+    write_file(git_repo, "MANIFEST.md", _MANIFEST_TEXT)
+    write_file(git_repo, "src/pkg/core.py", "x = 1\n")
+    _commit_and_tag(git_repo, "v1.0.0")
+    write_file(git_repo, "src/pkg/core.py", "x = 2\n")
+    write_file(git_repo, "MANIFEST.md", _MANIFEST_TEXT + "\nrevised\n")
+    config = Config(
+        root=git_repo,
+        manifest=ManifestConfig(doc="MANIFEST.md", sources=["src/**/*.py"]),
+    )
+    findings, _ = check_manifest(config)
+    assert findings == []
+
+
 # --- versioned-files ------------------------------------------------------
 
 
@@ -394,6 +486,19 @@ def test_versioned_files_clean_when_unchanged(git_repo, write_file):
     )
     findings, _ = check_versioned_files(config)
     assert findings == []
+
+
+def test_versioned_files_notices_when_git_is_missing(tmp_path, write_file, monkeypatch):
+    # With git unresolvable on PATH the check must skip with a notice, not crash.
+    write_file(tmp_path, "data.json", '{"v": "1"}')
+    monkeypatch.setenv("PATH", "")
+    config = Config(
+        root=tmp_path,
+        versioned_files=[VersionedFile(path="data.json", pattern=_VF_PATTERN)],
+    )
+    findings, notices = check_versioned_files(config)
+    assert findings == []
+    assert any("git" in n.message for n in notices)
 
 
 def test_versioned_files_skips_without_tag(git_repo, write_file):

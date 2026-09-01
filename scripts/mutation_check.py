@@ -51,6 +51,9 @@ MUTATIONS = [
     (CHECKS, "if then is not None and now.group(1) == then.group(1):",
      "if False and then is not None and now.group(1) == then.group(1):",
      "tests/test_checks.py::test_versioned_files_fires_when_marker_unmoved"),
+    (CHECKS, "if not _manifest_lists(text, rel, path.name):",
+     "if False and not _manifest_lists(text, rel, path.name):",
+     "tests/test_checks.py::test_manifest_fires_on_unlisted_source_file"),
 ]
 
 

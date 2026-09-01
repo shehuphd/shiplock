@@ -1,0 +1,4 @@
+# The test suite runs from the repo, where its conftest and the repo's own
+# shiplock.toml exist; setuptools' default template would ship tests/test*.py
+# without either, a suite that can't run. Ship the package alone.
+prune tests

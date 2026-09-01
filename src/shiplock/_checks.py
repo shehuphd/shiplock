@@ -340,6 +340,89 @@ def _coverage_skip_reason(target: str, result: dict) -> str:
     return reasons.get(status, f"can't read '{target}' ({status}); skipped")
 
 
+def check_manifest(config: Config) -> CheckResult:
+    """Assert the per-file manifest exists, lists every source file, and moved
+    with the sources — or, when no manifest is declared, remind that one helps.
+
+    The reminder is a notice, never a finding: a per-file map is good hygiene,
+    not something to fail a build over, and ``[manifest].remind = false``
+    silences it for teams that don't keep one.
+    """
+    name = "manifest"
+    m = config.manifest
+
+    if m is None or m.doc is None:
+        if m is not None and m.remind is False:
+            return [], []
+        if (config.root / "MANIFEST.md").is_file():
+            return [], [
+                Notice(name, "MANIFEST.md exists but isn't declared; add "
+                "[manifest] with doc and sources to shiplock.toml to keep it "
+                "checked, or set [manifest].remind = false to turn this "
+                "reminder off")
+            ]
+        return [], [
+            Notice(name, "no MANIFEST.md found; a per-file map of the codebase "
+            "gives readers a file index without opening the code. Generate one "
+            "by hand or with an AI tool and declare it under [manifest], or set "
+            "[manifest].remind = false to turn this reminder off")
+        ]
+
+    text = _read_text(config.root / m.doc)
+    if text is None:
+        return [Finding(name, f"declared manifest is missing: {m.doc}", path=m.doc)], []
+
+    findings: list[Finding] = []
+    notices: list[Notice] = []
+
+    if not re.search(r"^Last updated:", text, re.MULTILINE):
+        findings.append(
+            Finding(name, f"{m.doc} has no 'Last updated:' line", path=m.doc)
+        )
+
+    exempt: set[Path] = set()
+    for pattern in m.exempt:
+        exempt.update(p.resolve() for p in config.root.glob(pattern))
+    sources: list[Path] = []
+    seen: set[Path] = set()
+    for pattern in m.sources:
+        for path in config.root.glob(pattern):
+            resolved = path.resolve()
+            if path.is_file() and resolved not in exempt and resolved not in seen:
+                seen.add(resolved)
+                sources.append(path)
+
+    for path in sources:
+        rel = _rel(config.root, path)
+        if not _manifest_lists(text, rel, path.name):
+            findings.append(
+                Finding(name, f"source file '{rel}' isn't listed in {m.doc}", path=m.doc)
+            )
+
+    tag = _last_tag(config.root)
+    if tag is None:
+        notices.append(
+            Notice(name, "no git tag to compare the manifest against (not a git "
+            "repo, no tags yet, or git isn't installed); staleness not checked")
+        )
+    else:
+        changed = _changed_since(config.root, tag)
+        if changed is not None:
+            touched = sorted(
+                rel for rel in (_rel(config.root, p) for p in sources) if rel in changed
+            )
+            if touched and m.doc not in changed:
+                findings.append(
+                    Finding(
+                        name,
+                        f"sources changed since {tag} (e.g. {touched[0]}) but "
+                        f"{m.doc} didn't",
+                        path=m.doc,
+                    )
+                )
+    return findings, notices
+
+
 def check_versioned_files(config: Config) -> CheckResult:
     """Assert a data file that changed since the last tag moved its marker."""
     name = "versioned-files"
@@ -349,7 +432,8 @@ def check_versioned_files(config: Config) -> CheckResult:
     tag = _last_tag(config.root)
     if tag is None:
         return [], [
-            Notice(name, "no git tag to diff against (or not a git repo); skipped")
+            Notice(name, "no git tag to diff against (not a git repo, no tags "
+            "yet, or git isn't installed); skipped")
         ]
 
     findings: list[Finding] = []
@@ -458,12 +542,35 @@ def _source_members(source_dir: Path) -> list[str]:
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(root), *args],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    command = ["git", "-C", str(root), *args]
+    try:
+        return subprocess.run(command, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        # git isn't installed (or isn't executable): report it as a failed
+        # command so callers skip with a notice instead of crashing.
+        return subprocess.CompletedProcess(command, returncode=127, stdout="", stderr=str(exc))
+
+
+def _manifest_lists(text: str, rel: str, basename: str) -> bool:
+    """A file counts as listed by its repo-relative path or its file name.
+
+    Manifests often group entries in tables under a directory heading, naming
+    files by basename or a shortened path there — those spellings satisfy the
+    check too. The lookbehind only rejects a longer file name that happens to
+    end with this one (``xcli.py`` doesn't list ``cli.py``).
+    """
+    if rel in text:
+        return True
+    return re.search(rf"(?<![\w-]){re.escape(basename)}", text) is not None
+
+
+def _changed_since(root: Path, tag: str) -> set[str] | None:
+    """Repo-relative paths of tracked files that differ from ``tag``, or None
+    when git can't answer."""
+    result = _git(root, "diff", "--name-only", tag)
+    if result.returncode != 0:
+        return None
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
 def _last_tag(root: Path) -> str | None:
@@ -517,6 +624,7 @@ _CHECKS = (
     check_version,
     check_architecture,
     check_coverage,
+    check_manifest,
     check_versioned_files,
 )
 

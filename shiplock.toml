@@ -2,7 +2,7 @@
 # with the same package every other repo consumes.
 
 [docs]
-public = ["README.md", "USAGE.md", "ARCHITECTURE.md", "CHANGELOG.md"]
+public = ["README.md", "USAGE.md", "ARCHITECTURE.md", "CHANGELOG.md", "MANIFEST.md"]
 changelog = "CHANGELOG.md"
 readme = "README.md"
 
@@ -20,6 +20,11 @@ package = "shiplock"
 doc = "ARCHITECTURE.md"
 source_dir = "src/shiplock"
 exempt = ["__init__"]
+
+[manifest]
+doc = "MANIFEST.md"
+sources = ["src/**/*.py", "src/shiplock/prompts/*.md", "tests/**/*.py", "scripts/*.py"]
+exempt = []
 
 [[coverage]]
 object = "shiplock"
