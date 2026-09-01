@@ -42,6 +42,9 @@ Print the semantic audit prompt for a fresh agent:
 shiplock prompt
 ```
 
+`shiplock --version` prints the installed version, and `shiplock` alone prints a
+short welcome with these commands.
+
 ## Setup
 
 Configuration is one file: `shiplock.toml` at the repo root. The default run

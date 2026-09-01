@@ -1,6 +1,6 @@
 # Manifest
 
-Last updated: 2026-09-01 11:37:28 UTC
+Last updated: 2026-09-01 11:42:36 UTC
 
 Every current source file, what it does, and what it touches. A map for a
 reader orienting in the codebase, kept current in the same change that adds,
@@ -11,7 +11,7 @@ removes, renames, or repurposes a file.
 | File | What it does |
 |---|---|
 | `__init__.py` | Public API re-exports (`load_config`, `run_checks`, `Config`, `Report`, `Finding`, `Notice`, `ConfigError`) and `__version__`. |
-| `cli.py` | Command-line entry point. `main()` parses arguments (`check [path] [--json]`, `prompt`, bare welcome), falls back to the zero-config default run when no `shiplock.toml` exists, translates argparse errors to sentences with fuzzy suggestions, colors the finding/clean categories on a tty (`NO_COLOR` honored), renders findings to stdout and notices to stderr, owns the exit-code contract (0/1/2). Reads `prompts/audit.md` via `importlib.resources`. |
+| `cli.py` | Command-line entry point. `main()` parses arguments (`check [path] [--json]`, `prompt`, `--version`, bare welcome), falls back to the zero-config default run when no `shiplock.toml` exists, translates argparse errors to sentences with fuzzy suggestions, colors the finding/clean categories on a tty (`NO_COLOR` honored), renders findings to stdout and notices to stderr, owns the exit-code contract (0/1/2). Reads `prompts/audit.md` via `importlib.resources`. |
 | `_config.py` | Loads and validates `shiplock.toml` into frozen dataclasses (`Config`, `DocsConfig`, `StyleConfig`, `VersionConfig`, `ArchitectureConfig`, `ManifestConfig`, `CoverageEntry`, `VersionedFile`); `default_config()` builds the zero-config run from detected doc names. Raises `ConfigError` on anything malformed. Reads the filesystem only. |
 | `_checks.py` | The nine check functions (`docs-exist`, `banned-words`, `internal-refs`, `readme-links`, `version`, `architecture`, `coverage`, `manifest`, `versioned-files`) and `run_checks`. Reads repo files; shells out to `git` for `versioned-files` and the manifest staleness compare; calls `_introspect` for `version` and `coverage`. |
 | `_report.py` | Result types: `Finding` (a disagreement, fails the run), `Notice` (a skip with its reason), `Report` (both, plus `ok`). |
