@@ -22,10 +22,10 @@ jobs:
     uses: ./.github/workflows/gate.yml
     with:
       shiplock-spec: "."   # install shiplock from this repo, not PyPI
-      run-audit: true
-      # Routine pushes audit on the cheap model; a manual dispatch (the
-      # pre-release run) uses the stronger one.
-      audit-model: ${{ github.event_name == 'workflow_dispatch' && 'sonnet' || 'haiku' }}
+      # The deterministic checks run free on every push and PR; the billable
+      # semantic audit runs only on manual dispatch (the pre-release run).
+      run-audit: ${{ github.event_name == 'workflow_dispatch' }}
+      audit-model: "sonnet"
     secrets:
       # Stored in the provider/key format the gate expects, e.g. anthropic/sk-ant-...
       AUDIT_API_KEY: ${{ secrets.AUDIT_API_KEY }}
