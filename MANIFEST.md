@@ -1,6 +1,6 @@
 # Manifest
 
-Last updated: 2026-09-01 12:46:24 UTC
+Last updated: 2026-09-01 13:04:48 UTC
 
 Every current source file, what it does, and what it touches. A map for a
 reader orienting in the codebase, kept current in the same change that adds,
@@ -37,7 +37,7 @@ removes, renames, or repurposes a file.
 | File | What it does |
 |---|---|
 | `scripts/mutation_check.py` | Breaks each check in turn and requires its own test to fail; restores sources in a finally block. Run by the CI `mutation` job. |
-| `.github/workflows/gate.yml` | Reusable release gate (`workflow_call`): `check` job runs the deterministic checks; `audit` job runs the semantic audit through a declared agent CLI (claude or codex, neutral key secrets), continues an interrupted run on an optional fallback runner via the audit's progress log, opens an issue on failure, and reports per-attempt token usage in the job summary. |
+| `.github/workflows/gate.yml` | Reusable release gate (`workflow_call`): `check` job runs the deterministic checks; `audit` job reads the provider from the `provider/key` audit secret, runs the semantic audit through that provider's agent CLI (anthropic or openai), continues an interrupted run on an optional fallback key via the audit's progress log, opens an issue on failure, and reports per-attempt token usage in the job summary. |
 | `.github/workflows/tests.yml` | Pytest across Python 3.10–3.13 plus the `mutation` job, on push and PR to main and by manual dispatch. |
 | `.github/workflows/release-gate.yml` | Shiplock consuming its own `gate.yml` (consumer zero) on push, PR, and manual dispatch; pushes audit on the cheap model, dispatches on the stronger one. |
 | `.github/workflows/release.yml` | Publishes to PyPI via trusted publishing when a GitHub Release is published; waits on the `release` environment's required-reviewer approval. |

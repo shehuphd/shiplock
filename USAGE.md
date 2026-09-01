@@ -234,54 +234,75 @@ jobs:
     uses: shehuphd/shiplock/.github/workflows/gate.yml@main
     with:
       shiplock-spec: "shiplock"   # the pip requirement for shiplock itself
-      audit-runner: claude        # or codex
+      audit-model: "sonnet"       # in your key's provider's own naming
     secrets:
-      AUDIT_API_KEY: ${{ secrets.YOUR_PROVIDER_KEY }}
+      # "provider/key" — the prefix tells the gate which agent CLI to run
+      AUDIT_API_KEY: ${{ secrets.YOUR_AUDIT_KEY }}
 ```
 
 The `check` job runs the deterministic checks on every push and pull request.
-The `audit` job runs the semantic layer through the agent CLI you declare and
+The `audit` job reads the provider from the key, runs the semantic layer
+through that provider's agent CLI, and
 opens an issue if the audit returns `AUDIT: FAIL` (or produces no verdict line,
 which fails closed). Each audit's token usage — input, output, cache traffic,
 and the CLI's own cost estimate where its runner reports one — is written to the
 run's job summary, and to the issue footer when one is opened, so the gate's
 spend stays visible per run.
 
-The workflow's inputs, all optional:
+The workflow's inputs:
 
 | Input | Default | What it controls |
 |---|---|---|
 | `python-version` | `"3.12"` | The Python the checks run on. |
 | `shiplock-spec` | `"shiplock"` | The pip requirement for shiplock itself (`"."` in shiplock's own repo). |
 | `run-audit` | `true` | Whether the semantic audit job runs at all. |
-| `audit-runner` | `"claude"` | The agent CLI that runs the audit: `claude` or `codex`. |
-| `audit-model` | `"sonnet"` | The model, in the declared runner's own naming. |
-| `audit-fallback-runner` | `""` | The CLI for the retry when the first attempt dies mid-run; empty disables failover. |
-| `audit-fallback-model` | `""` | The fallback attempt's model; empty reuses `audit-model`. |
-| `audit-permission-mode` | `"dontAsk"` | The permission mode for the `claude` runner's read-only run. |
+| `audit-model` | `""` | The audit's model, in the key's provider's own naming. Required when `run-audit` is true. |
+| `audit-fallback-model` | `""` | The fallback attempt's model, in the fallback key's provider's naming. Empty reuses `audit-model` when both keys name the same provider; a cross-provider fallback must declare its own. |
+| `audit-permission-mode` | `"dontAsk"` | The permission mode for the read-only run (`anthropic` keys only). |
 
-### The audit runner and its key
+### The audit key declares its provider
 
-The audit is runner-agnostic by design: the prompt is plain markdown, the tools
-are read-only, and the verdict contract is one greppable line — so any agent CLI
-that can read files and print text can run it, and the verdict's authority comes
-from the checklist, never from which vendor executed it. Declare the runner with
-`audit-runner` and supply the matching provider's key as the `AUDIT_API_KEY`
-secret; the gate maps it to the environment variable that runner expects. The
-`check` job needs nothing.
+The audit is provider-agnostic by design: the prompt is plain markdown, the
+tools are read-only, and the verdict contract is one greppable line — so any
+agent CLI that can read files and print text can run it, and the verdict's
+authority comes from the checklist, never from which vendor executed it.
+
+The `AUDIT_API_KEY` secret carries both the provider and the key as one string:
+
+```
+provider/key
+```
+
+For example `anthropic/sk-ant-...` or `openai/sk-...`. The provider part (before
+the first slash) is case-insensitive; the key part (after it) is passed to the
+provider's CLI byte for byte, so its case is preserved. The gate reads the
+prefix, installs and runs that provider's agent CLI — `anthropic` runs Claude
+Code, `openai` runs Codex — and hands it the bare key in the environment
+variable it expects. Supporting a new provider is a change inside the gate, not
+to the shape of anyone's secrets: when another vendor ships a headless agent
+CLI, switching to it means changing the secret's prefix and the model name.
+
+Because the provider names the model namespace, `audit-model` has no default:
+declare it in your provider's own naming. The `check` job needs no key.
 
 Add the key to the consuming repo at
 `https://github.com/<owner>/<repo>/settings/secrets/actions` → **New repository
-secret** (the secret in your repo can carry any name; the workflow's
-`secrets:` block maps it to `AUDIT_API_KEY`).
+secret** (the secret in your repo can carry any name; the workflow's `secrets:`
+block maps it to `AUDIT_API_KEY`). If your stored secret is a bare key, compose
+the prefix in the workflow instead of re-creating the secret:
+
+```yaml
+    secrets:
+      AUDIT_API_KEY: anthropic/${{ secrets.MY_BARE_KEY }}
+```
 
 Don't want the audit? Set `run-audit: false` and skip the key; the deterministic
 `check` job still runs.
 
 ### Failover to a second provider
 
-Declare `audit-fallback-runner` (with its own `AUDIT_FALLBACK_API_KEY` secret)
-and an audit whose first attempt dies mid-run — a revoked key, an exhausted
+Add an `AUDIT_FALLBACK_API_KEY` secret (same `provider/key` format) and an
+audit whose first attempt dies mid-run — a revoked key, an exhausted
 credit balance — is continued rather than redone. The mechanism is
 provider-neutral: as the audit settles each question it appends a line to a
 progress log in the workspace, and the second attempt reads that log, keeps the
@@ -294,12 +315,11 @@ same account is just as empty as the one that failed:
 
 ```yaml
     with:
-      audit-runner: claude
-      audit-fallback-runner: codex
-      audit-fallback-model: "<a model in the fallback runner's naming>"
+      audit-model: "sonnet"
+      audit-fallback-model: "<a model in the fallback provider's naming>"
     secrets:
-      AUDIT_API_KEY: ${{ secrets.ANTHROPIC_KEY }}
-      AUDIT_FALLBACK_API_KEY: ${{ secrets.OPENAI_KEY }}
+      AUDIT_API_KEY: ${{ secrets.MY_ANTHROPIC_AUDIT_KEY }}    # anthropic/sk-ant-...
+      AUDIT_FALLBACK_API_KEY: ${{ secrets.MY_OPENAI_AUDIT_KEY }}  # openai/sk-...
 ```
 
 With no fallback configured, a failed first attempt fails the job, and a re-run

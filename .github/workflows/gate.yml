@@ -7,11 +7,18 @@ name: shiplock gate
 #       uses: shehuphd/shiplock/.github/workflows/gate.yml@main
 #       with:
 #         shiplock-spec: "shiplock"   # "." for shiplock's own repo
+#         audit-model: "sonnet"       # in your provider's own naming
 #       secrets:
-#         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+#         AUDIT_API_KEY: ${{ secrets.YOUR_AUDIT_KEY }}
 #
 # Layer 1 (check) runs the deterministic checks. Layer 2 (audit) runs the
-# semantic audit through Claude Code and opens an issue on failure.
+# semantic audit and opens an issue on failure.
+#
+# Both audit secrets are provider-prefixed strings: "provider/key", e.g.
+# "anthropic/sk-ant-..." or "openai/sk-...". The gate reads the provider from
+# the prefix (case-insensitive) and hands the key (case-sensitive, everything
+# after the first slash) to that provider's agent CLI. Supporting a new
+# provider is a code change here; the shape of the secrets never moves.
 
 on:
   workflow_call:
@@ -28,40 +35,38 @@ on:
         description: "Run the Layer 2 semantic audit"
         type: boolean
         default: true
-      audit-runner:
-        description: "Agent CLI that runs the audit: claude | codex"
-        type: string
-        default: "claude"
       audit-model:
-        description: "Model for the audit run, in the declared runner's own naming"
-        type: string
-        default: "sonnet"
-      audit-fallback-runner:
         description: >-
-          Agent CLI for the retry when the first attempt dies mid-run: claude |
-          codex. Empty disables failover. Declare the runner whose provider the
-          fallback key belongs to — the whole point is a second, independent
-          provider or billing account, since credit exhaustion is
-          account-level and a sibling key from the same account is just as
-          empty.
+          Model for the audit run, in the key's provider's own naming. Required
+          when run-audit is true: the provider comes from AUDIT_API_KEY, and
+          model names don't carry across providers, so the gate never defaults
+          this.
         type: string
         default: ""
       audit-fallback-model:
-        description: "Model for the fallback attempt, in the fallback runner's naming"
+        description: >-
+          Model for the fallback attempt, in the fallback key's provider's
+          naming. Empty reuses audit-model when both keys name the same
+          provider; a cross-provider fallback must declare its own.
         type: string
         default: ""
       audit-permission-mode:
-        description: "Claude Code permission mode for the read-only audit run (claude runner only)"
+        description: "Claude Code permission mode for the read-only audit run (anthropic keys only)"
         type: string
         default: "dontAsk"
     secrets:
       AUDIT_API_KEY:
         description: >-
-          API key for the declared audit-runner's provider; required only when
-          run-audit is true.
+          The audit key as "provider/key" (e.g. anthropic/sk-ant-... or
+          openai/sk-...); required only when run-audit is true.
         required: false
       AUDIT_FALLBACK_API_KEY:
-        description: "API key for the declared audit-fallback-runner's provider."
+        description: >-
+          The key for the retry when the first attempt dies mid-run, as
+          "provider/key". Empty disables failover. Put it on a different
+          provider or billing account than the primary — credit exhaustion is
+          account-level, so a sibling key from the same account is just as
+          empty.
         required: false
 
 # Least privilege: no scopes at the top level; each job names what it needs.
@@ -114,29 +119,79 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
-      - name: Install the audit runners
+      - name: Read the key providers and install their runners
+        id: runners
+        env:
+          PRIMARY_KEY: ${{ secrets.AUDIT_API_KEY }}
+          FALLBACK_KEY: ${{ secrets.AUDIT_FALLBACK_API_KEY }}
         run: |
           set -euo pipefail
+          # "provider/key" → provider is the text before the first slash,
+          # lowercased; the key after it is left untouched (case-sensitive).
+          provider_of() {
+            case "$1" in
+              */*) printf '%s' "${1%%/*}" | tr '[:upper:]' '[:lower:]' ;;
+              *)   printf '' ;;
+            esac
+          }
+          runner_of() {  # provider → the agent CLI that speaks to it
+            case "$1" in
+              anthropic) echo claude ;;
+              openai)    echo codex ;;
+              *)         printf '' ;;
+            esac
+          }
+          require() {  # $1 secret name, $2 secret value → prints provider
+            provider="$(provider_of "$2")"
+            if [ -z "$provider" ]; then
+              echo "::error::$1 must be 'provider/key', e.g. anthropic/sk-ant-... or openai/sk-..." >&2
+              exit 1
+            fi
+            if [ -z "$(runner_of "$provider")" ]; then
+              echo "::error::$1 names provider '$provider'; the gate knows anthropic and openai" >&2
+              exit 1
+            fi
+            echo "$provider"
+          }
           install_runner() {
             case "$1" in
               claude) npm install -g @anthropic-ai/claude-code ;;
               codex)  npm install -g @openai/codex ;;
-              "")     ;;
-              *) echo "::error::unknown audit runner '$1'; the gate knows claude and codex" >&2; exit 1 ;;
             esac
           }
-          install_runner "${{ inputs.audit-runner }}"
-          if [ "${{ inputs.audit-fallback-runner }}" != "${{ inputs.audit-runner }}" ]; then
-            install_runner "${{ inputs.audit-fallback-runner }}"
-          fi
-          # A cross-runner fallback can't inherit the primary's model name —
-          # model naming is per provider. Fail here, not mid-failover.
-          if [ -n "${{ inputs.audit-fallback-runner }}" ] \
-            && [ "${{ inputs.audit-fallback-runner }}" != "${{ inputs.audit-runner }}" ] \
-            && [ -z "${{ inputs.audit-fallback-model }}" ]; then
-            echo "::error::audit-fallback-runner is a different runner than audit-runner, so audit-fallback-model must name a model in that runner's own naming" >&2
+          if [ -z "${PRIMARY_KEY:-}" ]; then
+            echo "::error::run-audit is on but the AUDIT_API_KEY secret is empty" >&2
             exit 1
           fi
+          if [ -z "${{ inputs.audit-model }}" ]; then
+            echo "::error::declare audit-model in your key's provider's own model naming; the gate can't default it because the provider comes from AUDIT_API_KEY" >&2
+            exit 1
+          fi
+          primary_provider="$(require AUDIT_API_KEY "$PRIMARY_KEY")"
+          primary_runner="$(runner_of "$primary_provider")"
+          install_runner "$primary_runner"
+          fallback_provider=""
+          fallback_runner=""
+          if [ -n "${FALLBACK_KEY:-}" ]; then
+            fallback_provider="$(require AUDIT_FALLBACK_API_KEY "$FALLBACK_KEY")"
+            fallback_runner="$(runner_of "$fallback_provider")"
+            if [ "$fallback_runner" != "$primary_runner" ]; then
+              install_runner "$fallback_runner"
+            fi
+            # A cross-provider fallback can't inherit the primary's model name —
+            # model naming is per provider. Fail here, not mid-failover.
+            if [ "$fallback_provider" != "$primary_provider" ] \
+              && [ -z "${{ inputs.audit-fallback-model }}" ]; then
+              echo "::error::the fallback key's provider ($fallback_provider) differs from the primary's ($primary_provider), so audit-fallback-model must name a model in $fallback_provider's own naming" >&2
+              exit 1
+            fi
+          fi
+          {
+            echo "primary-provider=$primary_provider"
+            echo "primary-runner=$primary_runner"
+            echo "fallback-provider=$fallback_provider"
+            echo "fallback-runner=$fallback_runner"
+          } >> "$GITHUB_OUTPUT"
       - name: Run the semantic audit
         id: audit
         env:
@@ -145,11 +200,21 @@ jobs:
         run: |
           set -euo pipefail
           shiplock prompt > audit-prompt.md
+          # The key is everything after the first slash of the secret. GitHub
+          # masks the whole secret; mask the bare key too so a stray echo can
+          # never print it. Masking must run at the top level — inside a
+          # command substitution the ::add-mask:: line would be captured
+          # instead of reaching the log processor.
+          key_of() { printf '%s' "${1#*/}"; }
+          echo "::add-mask::$(key_of "$PRIMARY_KEY")"
+          if [ -n "${FALLBACK_KEY:-}" ]; then
+            echo "::add-mask::$(key_of "$FALLBACK_KEY")"
+          fi
           # One adapter per runner: read-only tools, JSON-ish output captured
           # to the named file, the runner's own key variable set from the
           # neutral secret. The prompt's progress log (audit-progress.md) is
           # the state a second attempt continues from — it works across
-          # runners, unlike any one provider's session store.
+          # providers, unlike any one provider's session store.
           run_attempt() {  # $1 runner, $2 model, $3 key, $4 prompt-file, $5 out-file
             SID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
             case "$1" in
@@ -197,11 +262,13 @@ jobs:
             esac
           }
           rc=0
-          run_attempt "${{ inputs.audit-runner }}" "${{ inputs.audit-model }}" \
-            "$PRIMARY_KEY" audit-prompt.md audit.json || rc=$?
-          if [ "$rc" -ne 0 ] && [ -n "${{ inputs.audit-fallback-runner }}" ] && [ -n "${FALLBACK_KEY:-}" ]; then
-            echo "first attempt (${{ inputs.audit-runner }}) exited $rc; continuing on ${{ inputs.audit-fallback-runner }}" >&2
-            mv audit.json audit-first.json 2>/dev/null || true
+          run_attempt "${{ steps.runners.outputs.primary-runner }}" "${{ inputs.audit-model }}" \
+            "$(key_of "$PRIMARY_KEY")" audit-prompt.md audit.json || rc=$?
+          if [ "$rc" -ne 0 ] && [ -n "${{ steps.runners.outputs.fallback-runner }}" ]; then
+            echo "first attempt (${{ steps.runners.outputs.primary-provider }}) exited $rc; continuing on ${{ steps.runners.outputs.fallback-provider }}" >&2
+            # A first attempt that died before writing output still leaves an
+            # (empty) marker, so the usage table shows both attempts.
+            mv audit.json audit-first.json 2>/dev/null || : > audit-first.json
             {
               echo "The previous run of this audit was interrupted mid-way by an API failure."
               echo "Its progress log, if one exists at audit-progress.md, records the questions already settled — continue from the first question it doesn't cover, per the instructions below."
@@ -210,8 +277,8 @@ jobs:
             } > audit-resume-prompt.md
             fb_model="${{ inputs.audit-fallback-model }}"
             rc=0
-            run_attempt "${{ inputs.audit-fallback-runner }}" "${fb_model:-${{ inputs.audit-model }}}" \
-              "$FALLBACK_KEY" audit-resume-prompt.md audit.json || rc=$?
+            run_attempt "${{ steps.runners.outputs.fallback-runner }}" "${fb_model:-${{ inputs.audit-model }}}" \
+              "$(key_of "$FALLBACK_KEY")" audit-resume-prompt.md audit.json || rc=$?
           fi
           exit "$rc"
       - name: Act on the verdict
@@ -229,7 +296,11 @@ jobs:
           # can never block the verdict. The cost figure is the CLI's own
           # estimate; a tokens-to-USD conversion via the rates package is a
           # planned follow-up.
-          usage_row() { jq -r "$2 // \"n/a\"" "$1" 2>/dev/null || echo "n/a"; }
+          usage_row() {
+            # jq on an empty file exits 0 with no output; that's still n/a.
+            v="$(jq -r "$2 // \"n/a\"" "$1" 2>/dev/null || true)"
+            echo "${v:-n/a}"
+          }
           table_row() {
             echo "| $2 | $(usage_row "$1" '.usage.input_tokens') | $(usage_row "$1" '.usage.output_tokens') | $(usage_row "$1" '.usage.cache_read_input_tokens') | $(usage_row "$1" '.usage.cache_creation_input_tokens') | $(usage_row "$1" '.total_cost_usd') |"
           }
@@ -238,11 +309,11 @@ jobs:
             echo ""
             echo "| Attempt | Input | Output | Cache read | Cache write | Cost (CLI estimate, USD) |"
             echo "|---|---|---|---|---|---|"
-            if [ -s audit-first.json ]; then
-              table_row audit-first.json "1 (interrupted, ${{ inputs.audit-runner }})"
-              table_row audit.json "2 (continued, ${{ inputs.audit-fallback-runner }})"
+            if [ -e audit-first.json ]; then
+              table_row audit-first.json "1 (interrupted, ${{ steps.runners.outputs.primary-provider }})"
+              table_row audit.json "2 (continued, ${{ steps.runners.outputs.fallback-provider }})"
             else
-              table_row audit.json "1 (${{ inputs.audit-runner }})"
+              table_row audit.json "1 (${{ steps.runners.outputs.primary-provider }})"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           in_tok="$(usage_row audit.json '.usage.input_tokens')"
@@ -251,8 +322,8 @@ jobs:
           cache_w="$(usage_row audit.json '.usage.cache_creation_input_tokens')"
           cost="$(usage_row audit.json '.total_cost_usd')"
           usage_line="Audit usage: $in_tok in / $out_tok out (cache: $cache_r read, $cache_w written); CLI cost estimate: $cost USD."
-          if [ -s audit-first.json ]; then
-            usage_line="$usage_line Continued on the fallback runner after an interrupted first attempt; both attempts are in the job summary."
+          if [ -e audit-first.json ]; then
+            usage_line="$usage_line Continued on the fallback provider after an interrupted first attempt; both attempts are in the job summary."
           fi
 
           jq -r '.result // empty' audit.json > audit-output.txt 2>/dev/null || true
