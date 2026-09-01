@@ -269,6 +269,29 @@ key. The `check` job needs nothing. To enable the audit:
 Don't want the audit? Set `run-audit: false` and skip the key; the deterministic
 `check` job still runs.
 
+### The fallback key
+
+An optional second secret, `ANTHROPIC_API_KEY_FALLBACK`, makes the audit
+resumable: if the first attempt dies mid-run (a revoked key, an exhausted credit
+balance), the job resumes the same session under the fallback key — the finished
+portion of the audit is kept, and the second attempt continues from where the
+transcript stops rather than starting over. The job summary then shows both
+attempts' usage.
+
+The fallback key must come from a **different billing account or organization**
+than the primary. Credit exhaustion is an account-level event: a second key from
+the same account is just as empty as the first. Pass it through the workflow the
+same way:
+
+```yaml
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_API_KEY_FALLBACK: ${{ secrets.ANTHROPIC_API_KEY_FALLBACK }}
+```
+
+With no fallback configured, a failed first attempt fails the job, and a re-run
+starts the audit from scratch.
+
 Wire it in dormant first: start with `on: workflow_dispatch`, run it once by
 hand, then switch to the push and pull-request triggers above once a manual run
 passes.

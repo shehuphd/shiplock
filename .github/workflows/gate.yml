@@ -40,6 +40,14 @@ on:
       ANTHROPIC_API_KEY:
         description: "API key for the Layer 2 audit; required only when run-audit is true"
         required: false
+      ANTHROPIC_API_KEY_FALLBACK:
+        description: >-
+          Optional second API key from a DIFFERENT billing account or org. If
+          the audit's first attempt fails (a dead key, an exhausted credit
+          balance), the run resumes the same session under this key instead of
+          restarting. A key from the same org shares the same credit balance
+          and can't rescue an exhaustion.
+        required: false
 
 # Least privilege: no scopes at the top level; each job names what it needs.
 permissions: {}
@@ -97,16 +105,37 @@ jobs:
         id: audit
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FALLBACK_KEY: ${{ secrets.ANTHROPIC_API_KEY_FALLBACK }}
         run: |
           set -euo pipefail
           shiplock prompt > audit-prompt.md
           # Headless run: read-only tools only, no interactive prompt. JSON
-          # output carries the result text plus the run's token usage.
+          # output carries the result text plus the run's token usage. The
+          # session id is pinned so an interrupted run can be resumed.
+          SID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+          rc=0
           claude -p "$(cat audit-prompt.md)" \
+            --session-id "$SID" \
             --model "${{ inputs.audit-model }}" \
             --allowedTools "Read,Grep,Glob" \
             --permission-mode "${{ inputs.audit-permission-mode }}" \
-            --output-format json > audit.json
+            --output-format json > audit.json || rc=$?
+          if [ "$rc" -ne 0 ] && [ -n "${FALLBACK_KEY:-}" ]; then
+            # Resume the same session under the fallback key (a different
+            # billing account), so the finished portion of the audit isn't
+            # redone. The transcript lives on this runner's disk.
+            echo "first attempt exited $rc; resuming session under the fallback key" >&2
+            mv audit.json audit-first.json 2>/dev/null || true
+            rc=0
+            ANTHROPIC_API_KEY="$FALLBACK_KEY" claude -p \
+              --resume "$SID" \
+              "The previous run of this audit stopped mid-way on an API failure. Continue from where the transcript ends: keep the answers already settled, verify anything left half-done, work through the remaining questions, and end your output with the verdict line the original instructions require." \
+              --model "${{ inputs.audit-model }}" \
+              --allowedTools "Read,Grep,Glob" \
+              --permission-mode "${{ inputs.audit-permission-mode }}" \
+              --output-format json > audit.json || rc=$?
+          fi
+          exit "$rc"
       - name: Act on the verdict
         if: always()
         env:
@@ -122,20 +151,31 @@ jobs:
           # can never block the verdict. The cost figure is the CLI's own
           # estimate; a tokens-to-USD conversion via the rates package is a
           # planned follow-up.
-          usage_row() { jq -r "$1 // \"n/a\"" audit.json 2>/dev/null || echo "n/a"; }
-          in_tok="$(usage_row '.usage.input_tokens')"
-          out_tok="$(usage_row '.usage.output_tokens')"
-          cache_r="$(usage_row '.usage.cache_read_input_tokens')"
-          cache_w="$(usage_row '.usage.cache_creation_input_tokens')"
-          cost="$(usage_row '.total_cost_usd')"
+          usage_row() { jq -r "$2 // \"n/a\"" "$1" 2>/dev/null || echo "n/a"; }
+          table_row() {
+            echo "| $2 | $(usage_row "$1" '.usage.input_tokens') | $(usage_row "$1" '.usage.output_tokens') | $(usage_row "$1" '.usage.cache_read_input_tokens') | $(usage_row "$1" '.usage.cache_creation_input_tokens') | $(usage_row "$1" '.total_cost_usd') |"
+          }
           {
             echo "### Semantic audit usage"
             echo ""
-            echo "| Input | Output | Cache read | Cache write | Cost (CLI estimate, USD) |"
-            echo "|---|---|---|---|---|"
-            echo "| $in_tok | $out_tok | $cache_r | $cache_w | $cost |"
+            echo "| Attempt | Input | Output | Cache read | Cache write | Cost (CLI estimate, USD) |"
+            echo "|---|---|---|---|---|---|"
+            if [ -s audit-first.json ]; then
+              table_row audit-first.json "1 (interrupted)"
+              table_row audit.json "2 (resumed, fallback key)"
+            else
+              table_row audit.json "1"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
+          in_tok="$(usage_row audit.json '.usage.input_tokens')"
+          out_tok="$(usage_row audit.json '.usage.output_tokens')"
+          cache_r="$(usage_row audit.json '.usage.cache_read_input_tokens')"
+          cache_w="$(usage_row audit.json '.usage.cache_creation_input_tokens')"
+          cost="$(usage_row audit.json '.total_cost_usd')"
           usage_line="Audit usage: $in_tok in / $out_tok out (cache: $cache_r read, $cache_w written); CLI cost estimate: $cost USD."
+          if [ -s audit-first.json ]; then
+            usage_line="$usage_line Resumed under the fallback key after an interrupted first attempt; both attempts are in the job summary."
+          fi
 
           jq -r '.result // empty' audit.json > audit-output.txt 2>/dev/null || true
           if [ ! -s audit-output.txt ]; then

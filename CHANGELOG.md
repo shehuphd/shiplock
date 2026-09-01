@@ -24,8 +24,9 @@ semantic versioning.
 - A mutation check (`scripts/mutation_check.py`, run as a CI job) that breaks
   each check in turn and requires its own test to fail.
 - A reusable GitHub Actions workflow (`gate.yml`, `on: workflow_call`) that runs
-  both layers in CI, opens an issue on an audit failure, and reports each
-  audit's token usage and cost estimate in the job summary.
+  both layers in CI, opens an issue on an audit failure, reports each
+  audit's token usage and cost estimate in the job summary, and can resume an
+  interrupted audit under a fallback key from a second billing account.
 - A PyPI release workflow (`release.yml`) publishing via trusted publishing when
   a GitHub Release is published, behind a reviewer-gated environment.
 - Shiplock as consumer zero: its own `shiplock.toml`, run over the shiplock repo.

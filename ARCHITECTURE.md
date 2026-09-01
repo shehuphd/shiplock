@@ -108,7 +108,9 @@ CI lives in `.github/workflows/`:
   deterministic checks; job `audit` runs the semantic layer through the Claude
   Code CLI in JSON output mode, opens an issue on an `AUDIT: FAIL` verdict,
   fails closed when no verdict line is present, and writes each run's token
-  usage and CLI cost estimate to the job summary (and the issue footer). Any
+  usage and CLI cost estimate to the job summary (and the issue footer). With a
+  fallback key from a second billing account configured, an interrupted audit
+  resumes its own session under that key instead of restarting. Any
   repo consumes it with
   `uses: shehuphd/shiplock/.github/workflows/gate.yml@main`.
 - `tests.yml` — the pytest suite across Python 3.10 through 3.13, plus a
