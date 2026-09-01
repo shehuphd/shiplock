@@ -232,13 +232,14 @@ jobs:
                   --output-format json > "$5"
                 ;;
               codex)
-                # workspace-write so the progress log can be written; approvals
-                # off for CI. --json streams events whose turn.completed line
-                # carries token usage; the final message goes to its own file.
+                # workspace-write so the progress log can be written.
+                # `codex exec` is non-interactive by design — there is no
+                # approval flag to disable, only the sandbox policy. --json
+                # streams events whose turn.completed line carries token
+                # usage; the final message goes to its own file.
                 CODEX_API_KEY="$3" OPENAI_API_KEY="$3" codex exec \
                   --model "$2" \
                   --sandbox workspace-write \
-                  --ask-for-approval never \
                   --json \
                   --output-last-message "$5.txt" \
                   - < "$4" > "$5.events"
