@@ -1,6 +1,6 @@
 # Manifest
 
-Last updated: 2026-09-01 10:45:20 UTC
+Last updated: 2026-09-01 11:12:11 UTC
 
 Every current source file, what it does, and what it touches. A map for a
 reader orienting in the codebase, kept current in the same change that adds,
@@ -27,7 +27,7 @@ removes, renames, or repurposes a file.
 | `conftest.py` | Shared fixtures (`write_file`, `temp_module`, `git_repo`) and the per-run artifact writer (sorted CSV under `.test-runs/`). |
 | `test_config.py` | Config loader: malformed inputs raise `ConfigError`; a valid file parses. |
 | `test_style.py` | Banned-word matcher: word-boundary edges first, then hits. |
-| `test_checks.py` | Each check's failing cases, skip cases, and clean case; `versioned-files` against a live temp git repo. |
+| `test_checks.py` | Each check's failing cases, skip cases, and clean case; `manifest` and `versioned-files` against a live temp git repo. |
 | `test_introspect.py` | Introspection binds to the checked root: under-root reads, outside-root flagged, import errors as statuses, stdout-printing packages tolerated. |
 | `test_cli.py` | Usage errors as a person would hit them (typos, unknown flags, bad paths), the zero-config default run, `--json` shape, color discipline when piped, exit-code contract, welcome, prompt verdict lines. |
 | `test_docs.py` | Consumer zero: runs the full gate over this repo and fails on any finding. |

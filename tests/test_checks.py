@@ -126,6 +126,12 @@ def test_banned_words_scans_non_utf8_file_without_crashing(tmp_path):
     assert any(f.message == "banned word 'real'" for f in findings)
 
 
+def test_internal_refs_skips_without_docs_section(tmp_path):
+    findings, notices = check_internal_refs(Config(root=tmp_path))
+    assert findings == []
+    assert len(notices) == 1
+
+
 def test_internal_refs_fires_on_project_folder(tmp_path, write_file):
     write_file(tmp_path, "README.md", "see project/NOTES.md for details\n")
     config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
@@ -297,6 +303,12 @@ def _arch_config(root):
             doc="ARCHITECTURE.md", source_dir="src/pkg", exempt=["__init__"]
         ),
     )
+
+
+def test_architecture_skips_without_section(tmp_path):
+    findings, notices = check_architecture(Config(root=tmp_path))
+    assert findings == []
+    assert len(notices) == 1
 
 
 def test_architecture_fires_on_unnamed_module(tmp_path, write_file):
