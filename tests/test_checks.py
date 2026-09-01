@@ -139,6 +139,20 @@ def test_internal_refs_fires_on_project_folder(tmp_path, write_file):
     assert len(findings) == 1
 
 
+def test_internal_refs_fires_on_coding_standards_file(tmp_path, write_file):
+    write_file(tmp_path, "README.md", "conventions live in CODING.md\n")
+    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
+    findings, _ = check_internal_refs(config)
+    assert len(findings) == 1
+
+
+def test_internal_refs_fires_on_roadmap(tmp_path, write_file):
+    write_file(tmp_path, "README.md", "planned in ROADMAP.md\n")
+    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
+    findings, _ = check_internal_refs(config)
+    assert len(findings) == 1
+
+
 def test_internal_refs_carves_out_pypi_project_url(tmp_path, write_file):
     write_file(tmp_path, "README.md", "https://pypi.org/project/shiplock/\n")
     config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))

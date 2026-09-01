@@ -24,10 +24,13 @@ shiplock/
 │   └── dependabot.yml
 ├── scripts/
 │   └── mutation_check.py # breaks each check to confirm its test guards it
+├── tests/                # the suite (see MANIFEST.md for the per-file map)
 ├── shiplock.toml         # shiplock's own config (consumer zero)
 ├── pyproject.toml
 ├── MANIFEST.in           # prunes tests/ from the sdist
 ├── MANIFEST.md           # per-file map of the codebase
+├── .gitignore
+├── LICENSE
 ├── README.md
 ├── USAGE.md
 ├── ARCHITECTURE.md
