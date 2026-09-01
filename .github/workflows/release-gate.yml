@@ -25,7 +25,7 @@ jobs:
       # The deterministic checks run free on every push and PR; the billable
       # semantic audit runs only on manual dispatch (the pre-release run).
       run-audit: ${{ github.event_name == 'workflow_dispatch' }}
-      audit-model: "claude-sonnet-4-6"
+      audit-model: "claude-sonnet-5"
       audit-fallback-model: "gpt-4.1"
     secrets:
       # Both stored in the provider/key format the gate expects,
