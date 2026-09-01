@@ -6,6 +6,15 @@ name: release gate
 
 on:
   workflow_dispatch:
+    inputs:
+      audit-effort:
+        description: >-
+          Claude's reasoning effort for this dispatch's audit run (low,
+          medium, high, xhigh, max). Empty uses the CLI's own default
+          (currently high) — set this to compare a lower tier's findings
+          and cost against a prior dispatch without editing the workflow.
+        type: string
+        default: ""
   push:
     branches: [main]
   pull_request:
@@ -27,6 +36,7 @@ jobs:
       run-audit: ${{ github.event_name == 'workflow_dispatch' }}
       audit-model: "claude-sonnet-5"
       audit-fallback-model: "gpt-5.3-codex"
+      audit-effort: ${{ inputs.audit-effort || '' }}
     secrets:
       # Both stored in the provider/key format the gate expects,
       # e.g. anthropic/sk-ant-... and openai/sk-...

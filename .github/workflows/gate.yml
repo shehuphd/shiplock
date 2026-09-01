@@ -54,6 +54,14 @@ on:
         description: "Claude Code permission mode for the read-only audit run (anthropic keys only)"
         type: string
         default: "dontAsk"
+      audit-effort:
+        description: >-
+          Claude Code's reasoning effort for the audit run: low, medium,
+          high, xhigh, or max (anthropic keys only; codex has no equivalent
+          flag). Empty leaves the CLI's own default in place — currently
+          high, undocumented by shiplock beyond this line.
+        type: string
+        default: ""
     secrets:
       AUDIT_API_KEY:
         description: >-
@@ -229,11 +237,23 @@ jobs:
             SID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
             case "$1" in
               claude)
+                # Empty audit-effort leaves the CLI's own default (currently
+                # high) in place; a set value overrides it explicitly.
+                # Deliberately unquoted below so it word-splits into two args
+                # when set and vanishes when empty — a bash array would do
+                # the same, but empty-array expansion under set -u only
+                # became safe in bash 4.4+, and effort is always one of five
+                # fixed words with no spaces, so word-splitting is safe here.
+                effort_flag=""
+                if [ -n "${{ inputs.audit-effort }}" ]; then
+                  effort_flag="--effort ${{ inputs.audit-effort }}"
+                fi
                 ANTHROPIC_API_KEY="$3" claude -p "$(cat "$4")" \
                   --session-id "$SID" \
                   --model "$2" \
                   --allowedTools "Read,Grep,Glob,Write(audit-progress.md)" \
                   --permission-mode "${{ inputs.audit-permission-mode }}" \
+                  $effort_flag \
                   --output-format json > "$5"
                 ;;
               codex)

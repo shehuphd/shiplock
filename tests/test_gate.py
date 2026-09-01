@@ -42,7 +42,9 @@ def _step_scripts() -> dict[str, str]:
     }
 
 
-def _substitute(script: str, *, model: str, fb_model: str, outputs: dict[str, str]) -> str:
+def _substitute(
+    script: str, *, model: str, fb_model: str, effort: str, outputs: dict[str, str]
+) -> str:
     """Replace ${{ ... }} expressions the way the workflow runtime would."""
 
     def repl(match: re.Match[str]) -> str:
@@ -51,6 +53,7 @@ def _substitute(script: str, *, model: str, fb_model: str, outputs: dict[str, st
             "inputs.audit-model": model,
             "inputs.audit-fallback-model": fb_model,
             "inputs.audit-permission-mode": "dontAsk",
+            "inputs.audit-effort": effort,
         }
         if expr in inputs:
             return inputs[expr]
@@ -79,12 +82,15 @@ def gate(tmp_path, monkeypatch):
     _write_stub(bin_dir, "npm", 'echo "stub npm $*" >&2\n')
     _write_stub(bin_dir, "gh", 'echo "stub gh $*" >&2\n')
     _write_stub(bin_dir, "shiplock", 'echo "checklist ending in a verdict line"\n')
-    # The claude stub asserts the bare key arrived case-preserved, settles two
-    # questions into the progress log, then dies the way an API failure does.
+    # The claude stub asserts the bare key arrived case-preserved, records its
+    # argv (so a test can check which flags it was actually invoked with),
+    # settles two questions into the progress log, then dies the way an API
+    # failure does.
     _write_stub(
         bin_dir,
         "claude",
         f'[ "$ANTHROPIC_API_KEY" = "{PRIMARY_BARE_KEY}" ] || {{ echo "wrong key" >&2; exit 99; }}\n'
+        'printf "%s\\n" "$@" > claude-argv.txt\n'
         'printf "Q1 settled\\nQ2 settled\\n" > audit-progress.md\n'
         'echo "stub claude: dying mid-run" >&2\n'
         "exit 1\n",
@@ -114,12 +120,14 @@ def gate(tmp_path, monkeypatch):
     gh_output.touch()
     gh_summary.touch()
 
-    def run(step: str, *, primary="", fallback="", model="sonnet", fb_model=""):
+    def run(step: str, *, primary="", fallback="", model="sonnet", fb_model="", effort=""):
         outputs = {}
         for line in gh_output.read_text().splitlines():
             key, _, value = line.partition("=")
             outputs[key] = value
-        script = _substitute(scripts[step], model=model, fb_model=fb_model, outputs=outputs)
+        script = _substitute(
+            scripts[step], model=model, fb_model=fb_model, effort=effort, outputs=outputs
+        )
         return subprocess.run(
             ["bash", "-c", script],
             cwd=work,
@@ -143,7 +151,25 @@ def gate(tmp_path, monkeypatch):
 
     run.output_file = gh_output
     run.summary_file = gh_summary
+    run.work = work
     return run
+
+
+def test_audit_effort_reaches_claude_only_when_set(gate):
+    primary = f"anthropic/{PRIMARY_BARE_KEY}"
+    gate(STEP_RUNNERS, primary=primary)
+    gate(STEP_AUDIT, primary=primary, effort="medium")
+    argv = (gate.work / "claude-argv.txt").read_text().splitlines()
+    assert "--effort" in argv
+    assert argv[argv.index("--effort") + 1] == "medium"
+
+
+def test_audit_effort_omitted_leaves_the_cli_default(gate):
+    primary = f"anthropic/{PRIMARY_BARE_KEY}"
+    gate(STEP_RUNNERS, primary=primary)
+    gate(STEP_AUDIT, primary=primary)
+    argv = (gate.work / "claude-argv.txt").read_text().splitlines()
+    assert "--effort" not in argv
 
 
 def test_bare_key_without_provider_prefix_is_rejected(gate):
