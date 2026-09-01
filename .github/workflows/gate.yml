@@ -232,14 +232,18 @@ jobs:
                   --output-format json > "$5"
                 ;;
               codex)
-                # workspace-write so the progress log can be written.
-                # `codex exec` is non-interactive by design — there is no
-                # approval flag to disable, only the sandbox policy. --json
+                # codex's own sandbox (bubblewrap on Linux) can't set up its
+                # network namespace inside GitHub Actions' own containerized
+                # runner ("bwrap: loopback: Failed RTM_NEWADDR: Operation not
+                # permitted") — a nested-sandbox conflict, confirmed live. The
+                # runner is itself an ephemeral, single-use, externally
+                # sandboxed VM, which is exactly the case codex's own flag
+                # help text names as the intended use of this bypass. --json
                 # streams events whose turn.completed line carries token
                 # usage; the final message goes to its own file.
                 CODEX_API_KEY="$3" OPENAI_API_KEY="$3" codex exec \
                   --model "$2" \
-                  --sandbox workspace-write \
+                  --dangerously-bypass-approvals-and-sandbox \
                   --json \
                   --output-last-message "$5.txt" \
                   - < "$4" > "$5.events"
