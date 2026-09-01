@@ -27,7 +27,8 @@ semantic versioning.
   both layers in CI, opens an issue on an audit failure, reports each audit's
   token usage and a [rates](https://pypi.org/project/rates/)-priced USD cost
   in the job summary, runs the audit through the agent CLI of the provider
-  named in the `provider/key` audit secret (anthropic or openai), skips the
+  named in the `provider/key` audit secret (anthropic or openai), takes an
+  optional `audit-effort` input setting Claude's reasoning effort, skips the
   audit with a warning when no key secret is set, and can continue an
   interrupted audit on a fallback key from a second provider via the audit's
   own progress log.
