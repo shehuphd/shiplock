@@ -241,7 +241,9 @@ jobs:
 The `check` job runs the deterministic checks on every push and pull request.
 The `audit` job runs the semantic layer through the Claude Code CLI and opens an
 issue if the audit returns `AUDIT: FAIL` (or produces no verdict line, which
-fails closed).
+fails closed). Each audit's token usage — input, output, cache traffic, and the
+CLI's own cost estimate — lands in the run's job summary, and in the issue
+footer when one is opened, so the gate's spend stays visible per run.
 
 The workflow's inputs, all optional:
 

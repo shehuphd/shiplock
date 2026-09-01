@@ -100,33 +100,58 @@ jobs:
         run: |
           set -euo pipefail
           shiplock prompt > audit-prompt.md
-          # Headless run: read-only tools only, no interactive prompt. The
-          # permission mode is the one knob confirmed on the first manual
-          # dispatch (Claude Code CLI, per its current headless docs).
+          # Headless run: read-only tools only, no interactive prompt. JSON
+          # output carries the result text plus the run's token usage.
           claude -p "$(cat audit-prompt.md)" \
             --model "${{ inputs.audit-model }}" \
             --allowedTools "Read,Grep,Glob" \
             --permission-mode "${{ inputs.audit-permission-mode }}" \
-            | tee audit-output.txt
+            --output-format json > audit.json
       - name: Act on the verdict
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
-          if [ ! -s audit-output.txt ]; then
+          if [ ! -s audit.json ]; then
             echo "::error::the audit produced no output" >&2
+            exit 1
+          fi
+
+          # Usage report first, and fail-soft: a missing field prints n/a and
+          # can never block the verdict. The cost figure is the CLI's own
+          # estimate; a tokens-to-USD conversion via the rates package is a
+          # planned follow-up.
+          usage_row() { jq -r "$1 // \"n/a\"" audit.json 2>/dev/null || echo "n/a"; }
+          in_tok="$(usage_row '.usage.input_tokens')"
+          out_tok="$(usage_row '.usage.output_tokens')"
+          cache_r="$(usage_row '.usage.cache_read_input_tokens')"
+          cache_w="$(usage_row '.usage.cache_creation_input_tokens')"
+          cost="$(usage_row '.total_cost_usd')"
+          {
+            echo "### Semantic audit usage"
+            echo ""
+            echo "| Input | Output | Cache read | Cache write | Cost (CLI estimate, USD) |"
+            echo "|---|---|---|---|---|"
+            echo "| $in_tok | $out_tok | $cache_r | $cache_w | $cost |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          usage_line="Audit usage: $in_tok in / $out_tok out (cache: $cache_r read, $cache_w written); CLI cost estimate: $cost USD."
+
+          jq -r '.result // empty' audit.json > audit-output.txt 2>/dev/null || true
+          if [ ! -s audit-output.txt ]; then
+            echo "::error::the audit result carried no text" >&2
             exit 1
           fi
           verdict="$(grep -E '^AUDIT: (PASS|FAIL)' audit-output.txt | tail -1 || true)"
           if echo "$verdict" | grep -q 'AUDIT: FAIL'; then
+            printf '\n\n---\n%s\n' "$usage_line" >> audit-output.txt
             gh issue create \
               --title "Shiplock audit failed on ${GITHUB_SHA::7}" \
               --body-file audit-output.txt
             echo "::error::semantic audit failed; opened an issue" >&2
             exit 1
           elif echo "$verdict" | grep -q 'AUDIT: PASS'; then
-            echo "semantic audit passed"
+            echo "semantic audit passed — $usage_line"
           else
             # No verdict line is not a pass. Fail closed.
             echo "::error::no AUDIT verdict line found in the audit output" >&2
