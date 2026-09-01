@@ -20,7 +20,7 @@ shiplock/
 │   └── prompts/
 │       └── audit.md      # the semantic audit prompt (shipped as package data)
 ├── .github/
-│   ├── workflows/        # gate.yml (reusable), tests.yml, release-gate.yml
+│   ├── workflows/        # gate.yml (reusable), tests.yml, release-gate.yml, release.yml
 │   └── dependabot.yml
 ├── scripts/
 │   └── mutation_check.py # breaks each check to confirm its test guards it

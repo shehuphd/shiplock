@@ -93,6 +93,14 @@ def test_banned_words_sweeps_unreleased_changelog_section(tmp_path, write_file):
     assert len(findings) == 1
 
 
+def test_banned_words_fires_in_a_source_glob(tmp_path, write_file):
+    write_file(tmp_path, "src/pkg/core.py", "# a real workhorse\n")
+    config = Config(root=tmp_path, style=StyleConfig(source_globs=["src/**/*.py"]))
+    findings, _ = check_banned_words(config)
+    assert len(findings) == 1
+    assert findings[0].path == "src/pkg/core.py"
+
+
 def test_banned_words_honors_exclude_glob(tmp_path, write_file):
     write_file(tmp_path, "src/pkg/_words.py", "# defines real, gaps, sits\n")
     config = Config(
@@ -148,10 +156,14 @@ def test_internal_refs_fires_on_claude_dir(tmp_path, write_file):
 
 
 def test_internal_refs_fires_on_other_assistant_dirs(tmp_path, write_file):
-    write_file(tmp_path, "README.md", "notes in .codex/plan.md and .cursor/rules\n")
+    write_file(
+        tmp_path,
+        "README.md",
+        "notes in .codex/plan.md, .grok/state, and .cursor/rules\n",
+    )
     config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
     findings, _ = check_internal_refs(config)
-    assert len(findings) == 2
+    assert len(findings) == 3
 
 
 def test_internal_refs_ignores_claude_domain(tmp_path, write_file):

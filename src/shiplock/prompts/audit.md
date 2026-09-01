@@ -7,9 +7,10 @@ against what changed since the last commit. A defect that predates today's work
 is still a defect, and delta-focused review is blind to it.
 
 The deterministic checks (`shiplock check`) have already run and cover the
-mechanical facts: missing docs, banned words, absolute README links, version
-alignment, the architecture module list, object coverage, versioned-file
-markers. Do not re-do their work. Yours is the semantic layer they can't reach.
+mechanical facts: missing docs, banned words, internal references in public
+docs, absolute README links, version alignment, the architecture module list,
+object coverage, the per-file manifest, versioned-file markers. Do not re-do
+their work. Yours is the semantic layer they can't reach.
 
 ## How to work
 
