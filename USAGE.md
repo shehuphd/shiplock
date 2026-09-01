@@ -257,9 +257,12 @@ The `audit` job reads the provider from the key, runs the semantic layer
 through that provider's agent CLI, and
 opens an issue if the audit returns `AUDIT: FAIL` (or produces no verdict line,
 which fails closed). Each audit's token usage — input, output, cache traffic,
-and the CLI's own cost estimate where its runner reports one — is written to the
-run's job summary, and to the issue footer when one is opened, so the gate's
-spend stays visible per run.
+and a cost in USD priced by [rates](https://pypi.org/project/rates/) from the
+attempt's own provider and model — is written to the run's job summary, and to
+the issue footer when one is opened, so the gate's spend stays visible per run.
+The price comes from rates' bundled offline snapshot (no extra network call);
+an attempt on a model rates doesn't carry a price for shows `n/a` rather than
+guessing.
 
 The workflow's inputs:
 

@@ -1,6 +1,6 @@
 # Manifest
 
-Last updated: 2026-09-01 15:48:53 UTC
+Last updated: 2026-09-01 16:04:05 UTC
 
 Every current source file, what it does, and what it touches. A map for a
 reader orienting in the codebase, kept current in the same change that adds,
@@ -31,14 +31,14 @@ removes, renames, or repurposes a file.
 | `test_introspect.py` | Introspection binds to the checked root: under-root reads, outside-root flagged, import errors as statuses, stdout-printing packages tolerated. |
 | `test_cli.py` | Usage errors as a person would hit them (typos, unknown flags, bad paths), the zero-config default run, `--json` shape, color discipline when piped, exit-code contract, welcome, prompt verdict lines. |
 | `test_docs.py` | Consumer zero: runs the full gate over this repo and fails on any finding. |
-| `test_gate.py` | The gate workflow's shell orchestration: extracts the audit job's step scripts from `gate.yml` and runs them under bash against stub agent CLIs — key-format and provider validation, the missing-key skip, case handling, and the cross-provider failover continuation. |
+| `test_gate.py` | The gate workflow's shell orchestration: extracts the audit job's step scripts from `gate.yml` and runs them under bash against stub agent CLIs — key-format and provider validation, the missing-key skip, case handling, the cross-provider failover continuation, and the rates-priced usage table. |
 
 ## Scripts and CI
 
 | File | What it does |
 |---|---|
 | `scripts/mutation_check.py` | Breaks each check in turn and requires its own test to fail; restores sources in a finally block. Run by the CI `mutation` job. |
-| `.github/workflows/gate.yml` | Reusable release gate (`workflow_call`): `check` job runs the deterministic checks; `audit` job reads the provider from the `provider/key` audit secret, runs the semantic audit through that provider's agent CLI (anthropic or openai), continues an interrupted run on an optional fallback key via the audit's progress log, skips the audit with a warning when no key secret is set, opens an issue on failure, and reports per-attempt token usage in the job summary. |
+| `.github/workflows/gate.yml` | Reusable release gate (`workflow_call`): `check` job runs the deterministic checks; `audit` job reads the provider from the `provider/key` audit secret, runs the semantic audit through that provider's agent CLI (anthropic or openai), continues an interrupted run on an optional fallback key via the audit's progress log, skips the audit with a warning when no key secret is set, opens an issue on failure, and reports per-attempt token usage and a rates-priced USD cost in the job summary. |
 | `.github/workflows/tests.yml` | Pytest across Python 3.10–3.13 plus the `mutation` job, on push and PR to main and by manual dispatch. |
 | `.github/workflows/release-gate.yml` | Shiplock consuming its own `gate.yml` (consumer zero): deterministic checks on push and PR; the billable semantic audit only on manual dispatch. |
 | `.github/workflows/release.yml` | Publishes to PyPI via trusted publishing when a GitHub Release is published; waits on the `release` environment's required-reviewer approval. |

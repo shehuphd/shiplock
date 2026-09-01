@@ -24,12 +24,13 @@ semantic versioning.
 - A mutation check (`scripts/mutation_check.py`, run as a CI job) that breaks
   each check in turn and requires its own test to fail.
 - A reusable GitHub Actions workflow (`gate.yml`, `on: workflow_call`) that runs
-  both layers in CI, opens an issue on an audit failure, reports each
-  audit's token usage in the job summary, runs the audit through the agent CLI
-  of the provider named in the `provider/key` audit secret (anthropic or
-  openai), skips the audit with a warning when no key secret is set, and can
-  continue an interrupted audit on a fallback key from a second provider via
-  the audit's own progress log.
+  both layers in CI, opens an issue on an audit failure, reports each audit's
+  token usage and a [rates](https://pypi.org/project/rates/)-priced USD cost
+  in the job summary, runs the audit through the agent CLI of the provider
+  named in the `provider/key` audit secret (anthropic or openai), skips the
+  audit with a warning when no key secret is set, and can continue an
+  interrupted audit on a fallback key from a second provider via the audit's
+  own progress log.
 - A PyPI release workflow (`release.yml`) publishing via trusted publishing when
   a GitHub Release is published, behind a reviewer-gated environment.
 - Shiplock as consumer zero: its own `shiplock.toml`, run over the shiplock repo.

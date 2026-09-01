@@ -110,7 +110,8 @@ CI lives in `.github/workflows/`:
   layer through that provider's agent CLI (`anthropic` runs Claude Code,
   `openai` runs Codex), opens an issue on an `AUDIT: FAIL` verdict, fails
   closed when no verdict line is present, and writes each attempt's token
-  usage to the job summary (and the issue footer). With a fallback key from a
+  usage and a [rates](https://pypi.org/project/rates/)-priced USD cost to the
+  job summary (and the issue footer). With a fallback key from a
   second provider configured, an interrupted audit continues from its own
   progress log instead of restarting. With no key secret set at all, the audit
   is skipped with a warning and the deterministic checks still gate the run.
@@ -147,7 +148,8 @@ each check in turn and confirms its own test fails, so a test that guards nothin
 can't pass unnoticed. The gate workflow's shell orchestration is tested too:
 `tests/test_gate.py` extracts the audit job's step scripts from `gate.yml`
 itself and runs them against stub agent CLIs, covering key validation, the
-missing-key skip, and the cross-provider failover continuation.
+missing-key skip, the cross-provider failover continuation, and the
+rates-priced usage table.
 
 ## Future considerations
 

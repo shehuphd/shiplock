@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -125,7 +126,11 @@ def gate(tmp_path, monkeypatch):
             capture_output=True,
             text=True,
             env={
-                "PATH": f"{bin_dir}:/usr/bin:/bin",
+                # The running interpreter's own bin dir goes first so the
+                # embedded rates_cost() picks up the same "rates" install
+                # this test suite runs under (real CI installs it the same
+                # way: pip install rates into the job's own interpreter).
+                "PATH": f"{bin_dir}:{Path(sys.executable).parent}:/usr/bin:/bin",
                 "HOME": str(tmp_path),
                 "PRIMARY_KEY": primary,
                 "FALLBACK_KEY": fallback,
@@ -224,3 +229,36 @@ def test_interrupted_run_continues_on_the_fallback_provider(gate):
     # The interrupted attempt reported no usage; its cells fall back to n/a.
     assert "| 1 (interrupted, anthropic) | n/a |" in summary
     assert "| 2 (continued, openai) | 50 | 900 | 40000 |" in summary
+    # "gpt-test" isn't a real model rates prices, so the cost column
+    # degrades to n/a rather than erroring the step.
+    assert summary.rstrip().endswith("| n/a |")
+
+
+def test_rates_prices_each_provider_from_its_own_usage(gate):
+    # A real model name on each side, so rates actually has a rate to price
+    # against — the fixed 50/900/40000 usage the claude and codex stubs
+    # report translates to a specific dollar figure per provider's card.
+    primary = f"anthropic/{PRIMARY_BARE_KEY}"
+    fallback = f"openai/{FALLBACK_BARE_KEY}"
+    setup = gate(
+        STEP_RUNNERS, primary=primary, fallback=fallback,
+        model="claude-sonnet-5", fb_model="gpt-5.3-codex",
+    )
+    assert setup.returncode == 0, setup.stderr
+    gate(
+        STEP_AUDIT, primary=primary, fallback=fallback,
+        model="claude-sonnet-5", fb_model="gpt-5.3-codex",
+    )
+    verdict = gate(
+        STEP_VERDICT, primary=primary, fallback=fallback,
+        model="claude-sonnet-5", fb_model="gpt-5.3-codex",
+    )
+    assert verdict.returncode == 0, verdict.stderr
+
+    # The codex stub's fixed usage (50 input, 40000 cache read, 900 output)
+    # priced on gpt-5.3-codex's real card (cache_read_mtok 0.175, output_mtok
+    # 14; fresh input clamps to 0 since cache read exceeds the input total in
+    # this fixture) comes to a specific, checkable figure — not just "not
+    # n/a" — proving rates actually priced it rather than degrading silently.
+    summary = gate.summary_file.read_text()
+    assert "| 2 (continued, openai) | 50 | 900 | 40000 | n/a | 0.0196 |" in summary
