@@ -114,8 +114,8 @@ CI lives in `.github/workflows/`:
 - `tests.yml` — the pytest suite across Python 3.10 through 3.13, plus a
   `mutation` job that runs `scripts/mutation_check.py`.
 - `release-gate.yml` — shiplock calling its own `gate.yml` over itself (consumer
-  zero). Ship-inactive: `workflow_dispatch` only until a manual run passes, then
-  the push and pull-request triggers get uncommented.
+  zero) on every push and pull request to main, plus manual dispatch. Pushes
+  audit on the cheap model; a dispatch uses the stronger one.
 - `release.yml` — publishes to PyPI via trusted publishing (OIDC) when a GitHub
   Release is published, behind the `release` environment's required-reviewer
   approval.

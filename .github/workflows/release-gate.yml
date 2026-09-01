@@ -1,17 +1,15 @@
 name: release gate
 
 # Shiplock as consumer zero: it runs its own reusable gate over itself.
-#
-# Ship-inactive: this starts as workflow_dispatch only. After one
-# manual run passes green, uncomment the push/pull_request triggers below so the
-# gate runs on every push and PR to main.
+# Started workflow_dispatch-only; the push and pull-request triggers went live
+# after the first manual run passed green (2026-09-01).
 
 on:
   workflow_dispatch:
-  # push:
-  #   branches: [main]
-  # pull_request:
-  #   branches: [main]
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 # Ceiling for the reusable workflow's jobs: it needs to read the repo and open
 # an issue on an audit failure.
@@ -25,5 +23,8 @@ jobs:
     with:
       shiplock-spec: "."   # install shiplock from this repo, not PyPI
       run-audit: true
+      # Routine pushes audit on the cheap model; a manual dispatch (the
+      # pre-release run) uses the stronger one.
+      audit-model: ${{ github.event_name == 'workflow_dispatch' && 'sonnet' || 'haiku' }}
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
