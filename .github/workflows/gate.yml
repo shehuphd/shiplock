@@ -352,3 +352,26 @@ jobs:
             echo "::error::no AUDIT verdict line found in the audit output" >&2
             exit 1
           fi
+
+      - name: Upload audit debug artifacts on failure
+        # No live run's raw output is kept anywhere else, so a run that fails
+        # in a way the fail-soft usage code doesn't anticipate is otherwise
+        # undiagnosable without paying for a repeat run. These files carry the
+        # prompt, each attempt's raw event stream and final message, and the
+        # built envelope — no key material passes through any of them.
+        if: ${{ failure() && steps.runners.outputs.skip != 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: audit-debug-${{ github.run_id }}
+          path: |
+            audit-prompt.md
+            audit-resume-prompt.md
+            audit.json
+            audit.json.events
+            audit.json.txt
+            audit-first.json
+            audit-first.json.events
+            audit-first.json.txt
+            audit-output.txt
+          if-no-files-found: ignore
+          retention-days: 7
