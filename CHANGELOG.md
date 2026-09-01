@@ -3,7 +3,7 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
-## [Unreleased]
+## [0.0.1] - 2026-09-01
 
 ### Added
 - Nine deterministic docs-vs-code checks: `docs-exist`, `banned-words`,
