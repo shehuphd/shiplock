@@ -287,14 +287,9 @@ declare it in your provider's own naming. The `check` job needs no key.
 
 Add the key to the consuming repo at
 `https://github.com/<owner>/<repo>/settings/secrets/actions` → **New repository
-secret** (the secret in your repo can carry any name; the workflow's `secrets:`
-block maps it to `AUDIT_API_KEY`). If your stored secret is a bare key, compose
-the prefix in the workflow instead of re-creating the secret:
-
-```yaml
-    secrets:
-      AUDIT_API_KEY: anthropic/${{ secrets.MY_BARE_KEY }}
-```
+secret**, storing the whole `provider/key` string as the value (the secret in
+your repo can carry any name; the workflow's `secrets:` block maps it to
+`AUDIT_API_KEY`).
 
 Don't want the audit? Set `run-audit: false` and skip the key; the deterministic
 `check` job still runs.
