@@ -24,6 +24,15 @@ re-sends the conversation so far, so a run with few large reads costs a fraction
 of one with many small ones. Front-load the reading, then reason over what you
 hold.
 
+Keep a progress log, if your tools permit writing one file: after settling each
+numbered question, append one line to `audit-progress.md` in the working
+directory — the question number, a one-word outcome (clean, findings, skipped),
+and any findings in brief. If that file already exists when you start, an
+earlier run of this same audit was interrupted: treat its lines as settled work,
+spot-check one of them, and continue from the first question the log doesn't
+cover, carrying its recorded findings into your final report. Where writing
+isn't permitted, proceed without the log.
+
 Work through these questions. Each one comes from a documented miss.
 
 1. **Structure and antecedents.** After any insertion, move, or reorder, do the

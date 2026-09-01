@@ -25,6 +25,7 @@ jobs:
       run-audit: true
       # Routine pushes audit on the cheap model; a manual dispatch (the
       # pre-release run) uses the stronger one.
+      audit-runner: claude
       audit-model: ${{ github.event_name == 'workflow_dispatch' && 'sonnet' || 'haiku' }}
     secrets:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      AUDIT_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

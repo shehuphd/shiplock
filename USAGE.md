@@ -234,16 +234,18 @@ jobs:
     uses: shehuphd/shiplock/.github/workflows/gate.yml@main
     with:
       shiplock-spec: "shiplock"   # the pip requirement for shiplock itself
+      audit-runner: claude        # or codex
     secrets:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      AUDIT_API_KEY: ${{ secrets.YOUR_PROVIDER_KEY }}
 ```
 
 The `check` job runs the deterministic checks on every push and pull request.
-The `audit` job runs the semantic layer through the Claude Code CLI and opens an
-issue if the audit returns `AUDIT: FAIL` (or produces no verdict line, which
-fails closed). Each audit's token usage — input, output, cache traffic, and the
-CLI's own cost estimate — is written to the run's job summary, and to the issue
-footer when one is opened, so the gate's spend stays visible per run.
+The `audit` job runs the semantic layer through the agent CLI you declare and
+opens an issue if the audit returns `AUDIT: FAIL` (or produces no verdict line,
+which fails closed). Each audit's token usage — input, output, cache traffic,
+and the CLI's own cost estimate where its runner reports one — is written to the
+run's job summary, and to the issue footer when one is opened, so the gate's
+spend stays visible per run.
 
 The workflow's inputs, all optional:
 
@@ -252,41 +254,52 @@ The workflow's inputs, all optional:
 | `python-version` | `"3.12"` | The Python the checks run on. |
 | `shiplock-spec` | `"shiplock"` | The pip requirement for shiplock itself (`"."` in shiplock's own repo). |
 | `run-audit` | `true` | Whether the semantic audit job runs at all. |
-| `audit-model` | `"sonnet"` | The model the audit runs on (an alias survives model-id churn). |
-| `audit-permission-mode` | `"dontAsk"` | The Claude Code permission mode for the read-only audit run. |
+| `audit-runner` | `"claude"` | The agent CLI that runs the audit: `claude` or `codex`. |
+| `audit-model` | `"sonnet"` | The model, in the declared runner's own naming. |
+| `audit-fallback-runner` | `""` | The CLI for the retry when the first attempt dies mid-run; empty disables failover. |
+| `audit-fallback-model` | `""` | The fallback attempt's model; empty reuses `audit-model`. |
+| `audit-permission-mode` | `"dontAsk"` | The permission mode for the `claude` runner's read-only run. |
 
-### The audit key
+### The audit runner and its key
 
-The `audit` job calls the Claude API, so each consuming repo supplies its own
-key. The `check` job needs nothing. To enable the audit:
+The audit is runner-agnostic by design: the prompt is plain markdown, the tools
+are read-only, and the verdict contract is one greppable line — so any agent CLI
+that can read files and print text can run it, and the verdict's authority comes
+from the checklist, never from which vendor executed it. Declare the runner with
+`audit-runner` and supply the matching provider's key as the `AUDIT_API_KEY`
+secret; the gate maps it to the environment variable that runner expects. The
+`check` job needs nothing.
 
-1. Create an Anthropic API key at
-   [platform.claude.com/settings/keys](https://platform.claude.com/settings/keys).
-2. Add it to the consuming repo as a repository secret named `ANTHROPIC_API_KEY`,
-   at `https://github.com/<owner>/<repo>/settings/secrets/actions` → **New
-   repository secret**.
+Add the key to the consuming repo at
+`https://github.com/<owner>/<repo>/settings/secrets/actions` → **New repository
+secret** (the secret in your repo can carry any name; the workflow's
+`secrets:` block maps it to `AUDIT_API_KEY`).
 
 Don't want the audit? Set `run-audit: false` and skip the key; the deterministic
 `check` job still runs.
 
-### The fallback key
+### Failover to a second provider
 
-An optional second secret, `ANTHROPIC_API_KEY_FALLBACK`, makes the audit
-resumable: if the first attempt dies mid-run (a revoked key, an exhausted credit
-balance), the job resumes the same session under the fallback key — the finished
-portion of the audit is kept, and the second attempt continues from where the
-transcript stops rather than starting over. The job summary then shows both
-attempts' usage.
+Declare `audit-fallback-runner` (with its own `AUDIT_FALLBACK_API_KEY` secret)
+and an audit whose first attempt dies mid-run — a revoked key, an exhausted
+credit balance — is continued rather than redone. The mechanism is
+provider-neutral: as the audit settles each question it appends a line to a
+progress log in the workspace, and the second attempt reads that log, keeps the
+settled answers, and works on from the first uncovered question. The job summary
+then shows both attempts' usage.
 
-The fallback key must come from a **different billing account or organization**
-than the primary. Credit exhaustion is an account-level event: a second key from
-the same account is just as empty as the first. Pass it through the workflow the
-same way:
+The fallback belongs on a **different provider or billing account** than the
+primary — credit exhaustion is an account-level event, so a sibling key from the
+same account is just as empty as the one that failed:
 
 ```yaml
+    with:
+      audit-runner: claude
+      audit-fallback-runner: codex
+      audit-fallback-model: "<a model in the fallback runner's naming>"
     secrets:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      ANTHROPIC_API_KEY_FALLBACK: ${{ secrets.ANTHROPIC_API_KEY_FALLBACK }}
+      AUDIT_API_KEY: ${{ secrets.ANTHROPIC_KEY }}
+      AUDIT_FALLBACK_API_KEY: ${{ secrets.OPENAI_KEY }}
 ```
 
 With no fallback configured, a failed first attempt fails the job, and a re-run

@@ -105,12 +105,13 @@ Published to PyPI as `shiplock`, MIT-licensed. The package ships `py.typed` and
 CI lives in `.github/workflows/`:
 
 - `gate.yml` — the reusable gate (`on: workflow_call`). Job `check` runs the
-  deterministic checks; job `audit` runs the semantic layer through the Claude
-  Code CLI in JSON output mode, opens an issue on an `AUDIT: FAIL` verdict,
-  fails closed when no verdict line is present, and writes each run's token
-  usage and CLI cost estimate to the job summary (and the issue footer). With a
-  fallback key from a second billing account configured, an interrupted audit
-  resumes its own session under that key instead of restarting. Any
+  deterministic checks; job `audit` runs the semantic layer through a declared
+  agent CLI (`claude` or `codex`, each behind a neutral key secret), opens an
+  issue on an `AUDIT: FAIL` verdict, fails closed when no verdict line is
+  present, and writes each attempt's token usage to the job summary (and the
+  issue footer). With a fallback runner and key from a second provider
+  configured, an interrupted audit continues from its own progress log instead
+  of restarting. Any
   repo consumes it with
   `uses: shehuphd/shiplock/.github/workflows/gate.yml@main`.
 - `tests.yml` — the pytest suite across Python 3.10 through 3.13, plus a
