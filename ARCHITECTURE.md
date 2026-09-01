@@ -112,13 +112,17 @@ CI lives in `.github/workflows/`:
   closed when no verdict line is present, and writes each attempt's token
   usage to the job summary (and the issue footer). With a fallback key from a
   second provider configured, an interrupted audit continues from its own
-  progress log instead of restarting. Any repo consumes it with
+  progress log instead of restarting. With no key secret set at all, the audit
+  is skipped with a warning and the deterministic checks still gate the run.
+  Any repo consumes it with
   `uses: shehuphd/shiplock/.github/workflows/gate.yml@main`.
 - `tests.yml` — the pytest suite across Python 3.10 through 3.13, plus a
   `mutation` job that runs `scripts/mutation_check.py`.
 - `release-gate.yml` — shiplock calling its own `gate.yml` over itself (consumer
-  zero) on every push and pull request to main, plus manual dispatch. Pushes
-  audit on the cheap model; a dispatch uses the stronger one.
+  zero). The deterministic checks run on every push and pull request to main
+  and on manual dispatch; the billable semantic audit runs only on manual
+  dispatch (the pre-release run), with a fallback key from a second provider
+  armed for mid-run failures.
 - `release.yml` — publishes to PyPI via trusted publishing (OIDC) when a GitHub
   Release is published, behind the `release` environment's required-reviewer
   approval.

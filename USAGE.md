@@ -292,7 +292,9 @@ your repo can carry any name; the workflow's `secrets:` block maps it to
 `AUDIT_API_KEY`).
 
 Don't want the audit? Set `run-audit: false` and skip the key; the deterministic
-`check` job still runs.
+`check` job still runs. And if `run-audit` is on but no `AUDIT_API_KEY` secret
+is set, the audit is skipped with a warning rather than failing the run — the
+deterministic checks still gate it, and the warning keeps the skip visible.
 
 ### Failover to a second provider
 
