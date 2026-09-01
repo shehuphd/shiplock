@@ -121,6 +121,31 @@ def test_json_keeps_stdout_to_the_object_alone(tmp_path, write_file, capsys):
 # --- color discipline --------------------------------------------------------
 
 
+class _Tty:
+    """A stream stand-in whose isatty answer is fixed."""
+
+    def __init__(self, tty: bool):
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+def test_color_appears_on_a_tty(monkeypatch):
+    from shiplock.cli import _RED, _paint
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    painted = _paint("finding", _RED, _Tty(True))
+    assert painted.startswith("\033[") and painted.endswith("\033[0m")
+
+
+def test_no_color_env_suppresses_color_even_on_a_tty(monkeypatch):
+    from shiplock.cli import _RED, _paint
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert _paint("finding", _RED, _Tty(True)) == "finding"
+
+
 def test_piped_output_carries_no_escape_codes(tmp_path, write_file, capsys):
     # capsys streams aren't ttys, so this is the piped case.
     write_file(tmp_path, "shiplock.toml", '[docs]\npublic = ["README.md"]\n')

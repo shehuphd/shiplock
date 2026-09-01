@@ -77,8 +77,8 @@ The nine checks: `docs-exist`, `banned-words`, `internal-refs`,
 ## Data stores
 
 None. Shiplock holds no state between runs. It reads a repo's files and git
-metadata (via the `git` CLI, for the `versioned-files` check) and writes only to
-stdout and stderr.
+metadata (via the `git` CLI, for the `versioned-files` and `manifest` checks)
+and writes only to stdout and stderr.
 
 ## External integrations
 

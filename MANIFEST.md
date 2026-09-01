@@ -1,6 +1,6 @@
 # Manifest
 
-Last updated: 2026-09-01 11:12:11 UTC
+Last updated: 2026-09-01 11:19:46 UTC
 
 Every current source file, what it does, and what it touches. A map for a
 reader orienting in the codebase, kept current in the same change that adds,
@@ -50,5 +50,6 @@ removes, renames, or repurposes a file.
 | `pyproject.toml` | Package metadata, build config, test extras, pytest options. |
 | `shiplock.toml` | Shiplock's own gate config: doc surfaces, sweep globs, version package, architecture doc, coverage entries. |
 | `MANIFEST.in` | Prunes `tests/` from the sdist; the suite runs from the repo. |
+| `.gitignore` | Excludes the internal planning folder, assistant tool directories, the venv, build artifacts, and the per-run test CSVs. |
 | `README.md` / `USAGE.md` / `ARCHITECTURE.md` / `CHANGELOG.md` | Public docs: quick start, full manual, structure and components, release history. |
 | `LICENSE` | MIT. |
