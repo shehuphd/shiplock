@@ -234,6 +234,16 @@ The `audit` job runs the semantic layer through the Claude Code CLI and opens an
 issue if the audit returns `AUDIT: FAIL` (or produces no verdict line, which
 fails closed).
 
+The workflow's inputs, all optional:
+
+| Input | Default | What it controls |
+|---|---|---|
+| `python-version` | `"3.12"` | The Python the checks run on. |
+| `shiplock-spec` | `"shiplock"` | The pip requirement for shiplock itself (`"."` in shiplock's own repo). |
+| `run-audit` | `true` | Whether the semantic audit job runs at all. |
+| `audit-model` | `"sonnet"` | The model the audit runs on (an alias survives model-id churn). |
+| `audit-permission-mode` | `"dontAsk"` | The Claude Code permission mode for the read-only audit run. |
+
 ### The audit key
 
 The `audit` job calls the Claude API, so each consuming repo supplies its own

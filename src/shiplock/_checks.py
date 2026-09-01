@@ -518,6 +518,9 @@ _INTERNAL_REF_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("CODING.md", re.compile(r"(?<!\w)CODING\.md", re.IGNORECASE)),
     ("ROADMAP", re.compile(r"ROADMAP")),
     (".claude", re.compile(r"(?<![\w.])\.claude\b")),
+    (".codex", re.compile(r"(?<![\w.])\.codex\b")),
+    (".grok", re.compile(r"(?<![\w.])\.grok\b")),
+    (".cursor", re.compile(r"(?<![\w.])\.cursor\b")),
 )
 
 

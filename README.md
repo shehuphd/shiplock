@@ -62,9 +62,9 @@ section, is in
 Shiplock checks in two layers:
 
 1. **Deterministic checks** (`shiplock check`) — fast, exact, no model. Missing
-   docs, banned words, absolute README links, version alignment, the
-   architecture module list, object coverage, the per-file manifest,
-   versioned-file markers.
+   docs, banned words, internal references in public docs, absolute README
+   links, version alignment, the architecture module list, object coverage,
+   the per-file manifest, versioned-file markers.
 2. **A semantic audit** (`shiplock prompt`) — the prompt for a fresh agent to
    read the code and hold every doc claim against it, from state rather than
    from what changed. Centrally versioned inside the package, so every repo gets
@@ -75,6 +75,20 @@ Print the audit prompt with:
 ```bash
 shiplock prompt
 ```
+
+## In CI
+
+Shiplock ships a reusable GitHub Actions workflow that runs both layers on
+every push and pull request, and opens an issue when the audit fails:
+
+```yaml
+jobs:
+  gate:
+    uses: shehuphd/shiplock/.github/workflows/gate.yml@main
+```
+
+The full wiring — inputs, the audit's API key, the dormant-first rollout — is in
+[USAGE.md](https://github.com/shehuphd/shiplock/blob/main/USAGE.md).
 
 ## Documentation
 

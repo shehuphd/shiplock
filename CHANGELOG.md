@@ -20,6 +20,8 @@ semantic versioning.
   `Finding`, `Notice`, and `ConfigError` types.
 - A reusable GitHub Actions workflow (`gate.yml`, `on: workflow_call`) that runs
   both layers in CI and opens an issue on an audit failure.
+- A PyPI release workflow (`release.yml`) publishing via trusted publishing when
+  a GitHub Release is published, behind a reviewer-gated environment.
 - Shiplock as consumer zero: its own `shiplock.toml`, run over the shiplock repo.
 
 [Unreleased]: https://github.com/shehuphd/shiplock

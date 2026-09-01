@@ -147,6 +147,13 @@ def test_internal_refs_fires_on_claude_dir(tmp_path, write_file):
     assert len(findings) == 1
 
 
+def test_internal_refs_fires_on_other_assistant_dirs(tmp_path, write_file):
+    write_file(tmp_path, "README.md", "notes in .codex/plan.md and .cursor/rules\n")
+    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
+    findings, _ = check_internal_refs(config)
+    assert len(findings) == 2
+
+
 def test_internal_refs_ignores_claude_domain(tmp_path, write_file):
     # "platform.claude.com" is a domain, not the .claude assistant directory.
     write_file(tmp_path, "README.md", "get a key at platform.claude.com/keys\n")
@@ -333,6 +340,20 @@ def test_coverage_skips_on_import_failure(tmp_path, write_file):
     findings, notices = check_coverage(config)
     assert findings == []
     assert any("can't resolve" in n.message for n in notices)
+
+
+def test_coverage_fires_on_undocumented_export(tmp_path, write_file, temp_module):
+    name = temp_module(
+        "covmissing",
+        '__all__ = ["Widget", "helper"]\nclass Widget: ...\ndef helper(): ...\n',
+    )
+    write_file(tmp_path, "USAGE.md", "# Usage\nOnly Widget is documented.\n")
+    config = Config(
+        root=tmp_path,
+        coverage=[CoverageEntry(target=name, doc="USAGE.md", kind="exports")],
+    )
+    findings, _ = check_coverage(config)
+    assert any("helper" in f.message for f in findings)
 
 
 def test_coverage_clean_when_all_documented(tmp_path, write_file, temp_module):
