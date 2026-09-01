@@ -78,6 +78,23 @@ Print the audit prompt with:
 shiplock prompt
 ```
 
+## In Python
+
+Everything the CLI does is callable — `load_config` and `run_checks` return a
+typed report, so the gate can run inside a test suite:
+
+```python
+from pathlib import Path
+from shiplock import load_config, run_checks
+
+def test_docs_match_code():
+    report = run_checks(load_config(Path(__file__).parent.parent))
+    assert report.ok, [f.message for f in report.findings]
+```
+
+The full API surface is in
+[USAGE.md](https://github.com/shehuphd/shiplock/blob/main/USAGE.md).
+
 ## In CI
 
 Shiplock ships a reusable GitHub Actions workflow that runs both layers on
