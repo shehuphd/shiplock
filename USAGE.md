@@ -274,7 +274,7 @@ The workflow's inputs:
 | `audit-model` | `""` | The audit's model, in the key's provider's own naming. Required when `run-audit` is true. |
 | `audit-fallback-model` | `""` | The fallback attempt's model, in the fallback key's provider's naming. Empty reuses `audit-model` when both keys name the same provider; a cross-provider fallback must declare its own. |
 | `audit-permission-mode` | `"dontAsk"` | The permission mode for the read-only run (`anthropic` keys only). |
-| `audit-effort` | `""` | Claude's reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`; `anthropic` keys only). Empty leaves the CLI's own default in place — currently `high`. |
+| `audit-effort` | `"medium"` | Claude's reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`; `anthropic` keys only). If the audit keeps missing drift your own review would have caught, raise this to `high` or `xhigh` — effort trades cost for how much the model reasons before answering, not just how much it writes. |
 
 ### The audit key declares its provider
 
