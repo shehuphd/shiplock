@@ -24,8 +24,8 @@ shiplock check path/to/repo
 The path can be relative or absolute, and defaults to the current directory
 (`shiplock check` inside a repo). With no `shiplock.toml` present, shiplock runs
 its default pass: the docs it recognizes by name (`README.md`, `USAGE.md`,
-`ARCHITECTURE.md`, `CHANGELOG.md`, `MANIFEST.md`, `CONTRIBUTING.md` — whichever
-exist) get swept for missing files, banned words, internal references, and
+`ARCHITECTURE.md`, `CHANGELOG.md`, `MANIFEST.md`, `CONTRIBUTING.md`,
+`CODE_OF_CONDUCT.md` — whichever exist) get swept for missing files, banned words, internal references, and
 relative README links, and a note on stderr says the run used defaults. The
 checks that need declarations skip with a notice each.
 
@@ -199,8 +199,8 @@ reason and the fix, and the run continues either way.
 | Code | Meaning |
 |---|---|
 | 0 | Clean: no check produced a finding. |
-| 1 | One or more checks found a problem. |
-| 2 | A config or usage error (no `shiplock.toml`, malformed TOML, a bad flag). |
+| 1 | A config or usage error (no `shiplock.toml`, malformed TOML, a bad flag). |
+| 2 | One or more checks found a problem. |
 
 Findings print to stdout; notices and the summary print to stderr, so stdout
 stays clean for a pipe. This makes `shiplock check` both a CI step and a pytest
