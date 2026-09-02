@@ -3,6 +3,16 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
+## [0.1.0] - 2026-09-02
+
+### Changed
+- `gate.yml`'s `audit-effort` input now defaults to `medium` instead of the
+  Claude Code CLI's own default (`high`), with guidance in the input
+  description and USAGE.md to raise it to `high` or `xhigh` if the audit
+  keeps missing drift a manual review would catch. Shiplock's own
+  `release-gate.yml` defaults its own dispatches to `low`, provisionally,
+  based on a same-repo comparison where `low` and `medium` agreed.
+
 ## [0.0.1] - 2026-09-01
 
 ### Added
@@ -36,4 +46,5 @@ semantic versioning.
   a GitHub Release is published, behind a reviewer-gated environment.
 - Shiplock as consumer zero: its own `shiplock.toml`, run over the shiplock repo.
 
+[0.1.0]: https://github.com/shehuphd/shiplock/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/shehuphd/shiplock/releases/tag/v0.0.1
