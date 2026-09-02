@@ -10,11 +10,14 @@ on:
       audit-effort:
         description: >-
           Claude's reasoning effort for this dispatch's audit run (low,
-          medium, high, xhigh, max). Empty uses the CLI's own default
-          (currently high) — set this to compare a lower tier's findings
-          and cost against a prior dispatch without editing the workflow.
+          medium, high, xhigh, max). Provisionally defaults to low as of
+          2026-09-02: low and medium both passed clean on the same repo
+          state that high had failed on shortly before, but low has not yet
+          been tested against a repo with a known real defect in it, so
+          this default is pending more comparisons, not a settled call.
+          Override per dispatch to compare tiers.
         type: string
-        default: ""
+        default: "low"
   push:
     branches: [main]
   pull_request:
