@@ -59,7 +59,7 @@ on:
           Claude Code's reasoning effort for the audit run: low, medium,
           high, xhigh, or max (anthropic keys only; codex has no equivalent
           flag). Empty leaves the CLI's own default in place — currently
-          high, undocumented by shiplock beyond this line.
+          high; see USAGE.md's workflow inputs table.
         type: string
         default: ""
     secrets:
