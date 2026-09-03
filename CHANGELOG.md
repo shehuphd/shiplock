@@ -3,7 +3,7 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
-## [Unreleased]
+## [0.2.0] - 2026-09-03
 
 ### Changed
 - The `audit-effort` default is now `high`, in both `gate.yml` and shiplock's
@@ -57,6 +57,6 @@ semantic versioning.
   a GitHub Release is published, behind a reviewer-gated environment.
 - Shiplock as consumer zero: its own `shiplock.toml`, run over the shiplock repo.
 
-[Unreleased]: https://github.com/shehuphd/shiplock/compare/v0.1.0...HEAD
+[0.2.0]: https://github.com/shehuphd/shiplock/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/shehuphd/shiplock/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/shehuphd/shiplock/releases/tag/v0.0.1
