@@ -95,7 +95,7 @@ and writes only to stdout and stderr.
   `_introspect`, which runs a subprocess with the checked root's source
   prepended to `sys.path` and confirms the module resolved under root before
   reading it. A target that resolves to a copy outside root, or won't import,
-  falls back to the installed copy so the comparison still runs.
+  skips with a notice naming the fix rather than comparing the wrong code.
 
 ## Deployment
 
