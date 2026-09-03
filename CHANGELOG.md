@@ -3,6 +3,17 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
+## [Unreleased]
+
+### Changed
+- The `audit-effort` default is now `high`, in both `gate.yml` and shiplock's
+  own `release-gate.yml`. In a planted-defect comparison (five doc-only
+  defects seeded on one commit, audited once per tier), `low` and `medium`
+  each reported three of the five while `high` reported all five, at $0.64
+  against `medium`'s $0.52. Every tier still returned `AUDIT: FAIL` on that
+  commit, so the higher default buys a more complete finding list per run
+  rather than a stricter verdict.
+
 ## [0.1.0] - 2026-09-02
 
 ### Changed
@@ -46,5 +57,6 @@ semantic versioning.
   a GitHub Release is published, behind a reviewer-gated environment.
 - Shiplock as consumer zero: its own `shiplock.toml`, run over the shiplock repo.
 
+[Unreleased]: https://github.com/shehuphd/shiplock/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/shehuphd/shiplock/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/shehuphd/shiplock/releases/tag/v0.0.1

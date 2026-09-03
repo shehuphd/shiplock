@@ -10,14 +10,13 @@ on:
       audit-effort:
         description: >-
           Claude's reasoning effort for this dispatch's audit run (low,
-          medium, high, xhigh, max). Provisionally defaults to low as of
-          2026-09-02: low and medium both passed clean on the same repo
-          state that high had failed on shortly before, but low has not yet
-          been tested against a repo with a known real defect in it, so
-          this default is pending more comparisons, not a settled call.
-          Override per dispatch to compare tiers.
+          medium, high, xhigh, max). Defaults to high as of 2026-09-03: in
+          a planted-defect comparison on this repo, low and medium each
+          found three of five seeded doc defects while high found all five
+          for $0.12 more than medium. Override per dispatch to compare
+          tiers.
         type: string
-        default: "low"
+        default: "high"
   push:
     branches: [main]
   pull_request:

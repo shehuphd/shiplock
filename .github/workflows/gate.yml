@@ -58,12 +58,13 @@ on:
         description: >-
           Claude Code's reasoning effort for the audit run: low, medium,
           high, xhigh, or max (anthropic keys only; codex has no equivalent
-          flag). Defaults to medium. If the audit keeps missing drift your
-          repo's own review would have caught, raise this to high or
-          xhigh; effort trades cost for how much the model reasons before
+          flag). Defaults to high. Lower it to cut cost when a blocked
+          release is all you need from a failed audit; raise it to xhigh if
+          audits still miss drift your repo's own review would have caught.
+          Effort trades cost for how much the model reasons before
           answering, not just how much it writes.
         type: string
-        default: "medium"
+        default: "high"
     secrets:
       AUDIT_API_KEY:
         description: >-
