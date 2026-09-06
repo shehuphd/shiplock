@@ -12,21 +12,16 @@ from __future__ import annotations
 import ast
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 from shiplock import _style
+from shiplock._compat import tomllib
 from shiplock._config import (
     Config,
     VersionedFile,
 )
 from shiplock._introspect import IntrospectError, introspect
 from shiplock._report import Finding, Notice
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:  # pragma: no cover - exercised only on 3.10
-    import tomli as tomllib
 
 CheckResult = tuple[list[Finding], list[Notice]]
 

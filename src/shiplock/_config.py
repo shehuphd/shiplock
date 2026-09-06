@@ -12,14 +12,10 @@ A malformed config raises ``ConfigError``, which the CLI turns into exit code 2
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-if sys.version_info >= (3, 11):
-    import tomllib
-else:  # pragma: no cover - exercised only on 3.10
-    import tomli as tomllib
+from shiplock._compat import tomllib
 
 CONFIG_FILENAME = "shiplock.toml"
 COVERAGE_KINDS = ("enum", "params", "exports")

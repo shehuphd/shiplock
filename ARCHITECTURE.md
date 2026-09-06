@@ -11,6 +11,7 @@ shiplock/
 ├── src/shiplock/
 │   ├── __init__.py       # public API re-exports and __version__
 │   ├── cli.py            # command-line entry point (check, prompt)
+│   ├── _compat.py        # version-guarded imports (tomllib), defined once
 │   ├── _config.py        # shiplock.toml loader and typed config model
 │   ├── _checks.py        # the eleven checks and the runner
 │   ├── _report.py        # Finding, Notice, Report result types
@@ -61,6 +62,7 @@ shiplock check
 | Module | Responsibility |
 |---|---|
 | `cli` | Parses arguments, dispatches `check` and `prompt`, renders the report, owns the exit-code contract. Greets a bare invocation, translates argparse errors into sentences with fuzzy command suggestions, and colors the finding/clean categories on a tty (`NO_COLOR` honored). |
+| `_compat` | Version-guarded imports in one place: `tomllib` from the standard library on 3.11+, the `tomli` backport on 3.10. |
 | `_config` | Reads `shiplock.toml`, validates it, and returns a frozen `Config` of typed sections. Raises `ConfigError` on anything malformed. |
 | `_checks` | Holds the eleven check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
 | `_report` | Defines `Finding` (a disagreement), `Notice` (a skip with a reason), and `Report` (both, plus `ok`). |
