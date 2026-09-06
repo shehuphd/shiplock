@@ -12,10 +12,12 @@ from shiplock._checks import (
     check_architecture,
     check_banned_words,
     check_coverage,
+    check_deps,
     check_docs_exist,
     check_internal_refs,
     check_manifest,
     check_readme_links,
+    check_test_assertions,
     check_version,
     check_versioned_files,
 )
@@ -23,9 +25,11 @@ from shiplock._config import (
     ArchitectureConfig,
     Config,
     CoverageEntry,
+    DepsConfig,
     DocsConfig,
     ManifestConfig,
     StyleConfig,
+    TestsConfig,
     VersionConfig,
     VersionedFile,
 )
@@ -569,3 +573,190 @@ def test_versioned_files_skips_without_tag(git_repo, write_file):
     findings, notices = check_versioned_files(config)
     assert findings == []
     assert any("no git tag" in n.message for n in notices)
+
+# --- deps-declared-once ---------------------------------------------------
+
+
+_PYPROJECT = (
+    '[project]\nname = "demo"\nversion = "1.0"\n'
+    'dependencies = ["requests>=2", "Rich_Text.Kit==1"]\n'
+    '[project.optional-dependencies]\ntest = ["pytest>=8"]\n'
+)
+
+
+def _deps_config(root, requirements=("requirements*.txt",), exempt=()):
+    return Config(
+        root=root,
+        deps=DepsConfig(requirements=list(requirements), exempt=list(exempt)),
+    )
+
+
+def test_deps_fires_when_a_requirement_duplicates_pyproject(tmp_path, write_file):
+    write_file(tmp_path, "pyproject.toml", _PYPROJECT)
+    write_file(tmp_path, "requirements.txt", "requests==2.31\n")
+    findings, _ = check_deps(_deps_config(tmp_path))
+    assert any("requests" in f.message and f.line == 1 for f in findings)
+
+
+def test_deps_compares_canonical_names_across_spellings(tmp_path, write_file):
+    write_file(tmp_path, "pyproject.toml", _PYPROJECT)
+    write_file(tmp_path, "requirements.txt", "rich-text-kit\n")
+    findings, _ = check_deps(_deps_config(tmp_path))
+    assert any("rich-text-kit" in f.message for f in findings)
+
+
+def test_deps_covers_optional_dependency_groups(tmp_path, write_file):
+    write_file(tmp_path, "pyproject.toml", _PYPROJECT)
+    write_file(tmp_path, "requirements.txt", "pytest\n")
+    findings, _ = check_deps(_deps_config(tmp_path))
+    assert any("pytest" in f.message for f in findings)
+
+
+def test_deps_ignores_comments_options_and_urls(tmp_path, write_file):
+    write_file(tmp_path, "pyproject.toml", _PYPROJECT)
+    write_file(
+        tmp_path,
+        "requirements.txt",
+        "# requests is pinned elsewhere\n"
+        "-r other.txt\n"
+        "--hash=sha256:abc\n"
+        "https://example.com/requests-2.31.tar.gz\n",
+    )
+    findings, _ = check_deps(_deps_config(tmp_path))
+    assert findings == []
+
+
+def test_deps_exempt_names_are_allowed_in_both(tmp_path, write_file):
+    write_file(tmp_path, "pyproject.toml", _PYPROJECT)
+    write_file(tmp_path, "requirements.txt", "requests==2.31\n")
+    findings, _ = check_deps(_deps_config(tmp_path, exempt=("Requests",)))
+    assert findings == []
+
+
+def test_deps_missing_pyproject_skips_with_notice(tmp_path, write_file):
+    write_file(tmp_path, "requirements.txt", "requests\n")
+    findings, notices = check_deps(_deps_config(tmp_path))
+    assert findings == []
+    assert any("pyproject.toml" in n.message for n in notices)
+
+
+def test_deps_globs_matching_nothing_skip_with_notice(tmp_path, write_file):
+    write_file(tmp_path, "pyproject.toml", _PYPROJECT)
+    findings, notices = check_deps(_deps_config(tmp_path))
+    assert findings == []
+    assert any("matched no files" in n.message for n in notices)
+
+
+def test_deps_undeclared_section_skips_with_notice(tmp_path):
+    findings, notices = check_deps(Config(root=tmp_path))
+    assert findings == []
+    assert any("no [deps]" in n.message for n in notices)
+
+
+def test_deps_clean_when_nothing_overlaps(tmp_path, write_file):
+    write_file(tmp_path, "pyproject.toml", _PYPROJECT)
+    write_file(tmp_path, "requirements.txt", "screenplain\nreportlab==4\n")
+    findings, _ = check_deps(_deps_config(tmp_path))
+    assert findings == []
+
+
+# --- test-assertions ------------------------------------------------------
+
+
+def _tests_config(root, exempt=()):
+    return Config(
+        root=root,
+        tests=TestsConfig(globs=["tests/**/*.py"], exempt=list(exempt)),
+    )
+
+
+def test_test_assertions_fires_on_a_test_with_no_expectation(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "tests/test_demo.py",
+        "def test_no_budget_means_no_gate():\n    check_budget(None)\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert any(
+        "test_no_budget_means_no_gate" in f.message and f.line == 1 for f in findings
+    )
+
+
+def test_test_assertions_fires_inside_test_classes(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "tests/test_demo.py",
+        "class TestGate:\n    def test_open(self):\n        gate()\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert any("test_open" in f.message for f in findings)
+
+
+def test_test_assertions_accepts_a_plain_assert(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "tests/test_demo.py",
+        "def test_sum():\n    assert 1 + 1 == 2\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert findings == []
+
+
+def test_test_assertions_accepts_pytest_raises(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "tests/test_demo.py",
+        "import pytest\n\n"
+        "def test_rejects():\n"
+        "    with pytest.raises(ValueError):\n"
+        "        int('x')\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert findings == []
+
+
+def test_test_assertions_accepts_assert_calls(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "tests/test_demo.py",
+        "def test_mocked(fake):\n    fake.assert_called_once_with(1)\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert findings == []
+
+
+def test_test_assertions_ignores_helpers_and_fixtures(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "tests/test_demo.py",
+        "def _build():\n    return 1\n\n"
+        "def fixture_like():\n    return 2\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert findings == []
+
+
+def test_test_assertions_exempts_by_name_and_by_path(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "tests/test_demo.py",
+        "def test_a():\n    run()\n\n"
+        "def test_b():\n    run()\n",
+    )
+    findings, _ = check_test_assertions(
+        _tests_config(tmp_path, exempt=("test_a", "tests/test_demo.py::test_b"))
+    )
+    assert findings == []
+
+
+def test_test_assertions_unparseable_file_notices(tmp_path, write_file):
+    write_file(tmp_path, "tests/test_demo.py", "def test_(:\n")
+    findings, notices = check_test_assertions(_tests_config(tmp_path))
+    assert findings == []
+    assert any("didn't parse" in n.message for n in notices)
+
+
+def test_test_assertions_undeclared_section_skips_with_notice(tmp_path):
+    findings, notices = check_test_assertions(Config(root=tmp_path))
+    assert findings == []
+    assert any("no [tests]" in n.message for n in notices)

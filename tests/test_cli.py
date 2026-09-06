@@ -115,7 +115,10 @@ def test_json_keeps_stdout_to_the_object_alone(tmp_path, write_file, capsys):
     write_file(tmp_path, "README.md", "# Demo\n")
     main(["check", str(tmp_path), "--json"])
     out = capsys.readouterr().out
-    json.loads(out)  # the whole of stdout is one JSON document
+    # json.loads over the whole of stdout proves it is one document: a stray
+    # notice line before or after the object would make this raise.
+    data = json.loads(out)
+    assert data["ok"] is True
 
 
 # --- color discipline --------------------------------------------------------
@@ -177,3 +180,27 @@ def test_version_flag(capsys):
         main(["--version"])
     assert exc.value.code == 0
     assert __version__ in capsys.readouterr().out
+
+
+def test_prompt_rejects_an_unknown_kind_with_a_sentence(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["prompt", "ablatoin"])
+    assert exc.value.code == EXIT_USAGE
+    err = capsys.readouterr().err
+    assert "isn't a shiplock prompt" in err
+    assert "ablation" in err
+
+
+def test_prompt_ablation_is_advisory_with_no_verdict_line(capsys):
+    code = main(["prompt", "ablation"])
+    assert code == EXIT_OK
+    out = capsys.readouterr().out
+    assert out.startswith("# Shiplock ablation audit")
+    assert "AUDIT: PASS" not in out
+
+
+def test_prompt_audit_kind_matches_the_default(capsys):
+    main(["prompt"])
+    default = capsys.readouterr().out
+    main(["prompt", "audit"])
+    assert capsys.readouterr().out == default

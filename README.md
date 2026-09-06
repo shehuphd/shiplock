@@ -66,7 +66,9 @@ Shiplock checks in two layers:
 1. **Deterministic checks** (`shiplock check`) — fast, exact, no model. Missing
    docs, banned words, internal references in public docs, absolute README
    links, version alignment, the architecture module list, object coverage,
-   the per-file manifest, versioned-file markers.
+   the per-file manifest, versioned-file markers, dependency declarations
+   duplicated between pyproject and requirements files, tests that carry no
+   assertion.
 2. **A semantic audit** (`shiplock prompt`) — the prompt for a fresh agent to
    read the code and hold every doc claim against it, from state rather than
    from what changed. Centrally versioned inside the package, so every repo gets
@@ -77,6 +79,11 @@ Print the audit prompt with:
 ```bash
 shiplock prompt
 ```
+
+There's also an advisory third prompt, outside the gate: `shiplock prompt
+ablation` prints a prompt for an agent to report what the repo could remove,
+merge, or make cheaper, with findings split into mechanical folds and decisions
+for the owner. It renders a report, never a verdict.
 
 ## In Python
 

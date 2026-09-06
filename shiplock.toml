@@ -31,3 +31,11 @@ object = "shiplock"
 doc = "USAGE.md"
 kind = "exports"
 exempt = ["__version__"]
+
+[deps]
+# Shiplock keeps no requirements files; the globs stand ready to catch one
+# appearing with duplicates of pyproject's declarations.
+requirements = ["requirements*.txt", "tools/requirements*.txt"]
+
+[tests]
+globs = ["tests/**/*.py"]

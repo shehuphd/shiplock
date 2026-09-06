@@ -87,3 +87,37 @@ kind = "enum"
     assert len(config.coverage) == 1
     assert config.coverage[0].kind == "enum"
     assert config.coverage[0].target == "pkg:ErrorCode"
+
+
+def test_deps_without_requirements_is_rejected(tmp_path, write_file):
+    write_file(tmp_path, "shiplock.toml", "[deps]\nexempt = []\n")
+    with pytest.raises(ConfigError, match="requirements"):
+        load_config(tmp_path)
+
+
+def test_deps_requirements_must_be_strings(tmp_path, write_file):
+    write_file(tmp_path, "shiplock.toml", "[deps]\nrequirements = [1]\n")
+    with pytest.raises(ConfigError, match="list of strings"):
+        load_config(tmp_path)
+
+
+def test_tests_without_globs_is_rejected(tmp_path, write_file):
+    write_file(tmp_path, "shiplock.toml", "[tests]\nexempt = []\n")
+    with pytest.raises(ConfigError, match="globs"):
+        load_config(tmp_path)
+
+
+def test_deps_and_tests_sections_parse(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "shiplock.toml",
+        '[deps]\nrequirements = ["requirements*.txt"]\nexempt = ["setuptools"]\n\n'
+        '[tests]\nglobs = ["tests/**/*.py"]\nexempt = ["test_smoke"]\n',
+    )
+    config = load_config(tmp_path)
+    assert config.deps is not None
+    assert config.deps.requirements == ["requirements*.txt"]
+    assert config.deps.exempt == ["setuptools"]
+    assert config.tests is not None
+    assert config.tests.globs == ["tests/**/*.py"]
+    assert config.tests.exempt == ["test_smoke"]

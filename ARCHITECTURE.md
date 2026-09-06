@@ -12,13 +12,14 @@ shiplock/
 │   ├── __init__.py       # public API re-exports and __version__
 │   ├── cli.py            # command-line entry point (check, prompt)
 │   ├── _config.py        # shiplock.toml loader and typed config model
-│   ├── _checks.py        # the nine checks and the runner
+│   ├── _checks.py        # the eleven checks and the runner
 │   ├── _report.py        # Finding, Notice, Report result types
 │   ├── _style.py         # the banned-word list and matcher
 │   ├── _introspect.py    # subprocess introspection bound to the checked root
 │   ├── py.typed          # PEP 561 marker
 │   └── prompts/
-│       └── audit.md      # the semantic audit prompt (shipped as package data)
+│       ├── audit.md      # the semantic audit prompt (shipped as package data)
+│       └── ablation.md   # the advisory ablation prompt (shipped as package data)
 ├── .github/
 │   ├── workflows/        # gate.yml (reusable), tests.yml, release-gate.yml, release.yml
 │   └── dependabot.yml
@@ -61,7 +62,7 @@ shiplock check
 |---|---|
 | `cli` | Parses arguments, dispatches `check` and `prompt`, renders the report, owns the exit-code contract. Greets a bare invocation, translates argparse errors into sentences with fuzzy command suggestions, and colors the finding/clean categories on a tty (`NO_COLOR` honored). |
 | `_config` | Reads `shiplock.toml`, validates it, and returns a frozen `Config` of typed sections. Raises `ConfigError` on anything malformed. |
-| `_checks` | Holds the nine check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
+| `_checks` | Holds the eleven check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
 | `_report` | Defines `Finding` (a disagreement), `Notice` (a skip with a reason), and `Report` (both, plus `ok`). |
 | `_style` | Defines the house banned-word list and the word-boundary matcher. Carved out of shiplock's own sweep, since it has to name the words. |
 | `_introspect` | Reads a package's `__version__`, `__all__`, enum members, and callable signatures in a subprocess that binds `sys.path` to the checked root, so `version` and `coverage` never read a stale installed copy. |
@@ -73,9 +74,10 @@ and returning `(findings, notices)`. The order in that tuple is the order
 findings are reported in. Adding a check means adding a function and one tuple
 entry; nothing else in the runner changes.
 
-The nine checks: `docs-exist`, `banned-words`, `internal-refs`,
+The eleven checks: `docs-exist`, `banned-words`, `internal-refs`,
 `readme-links`, `version`, `architecture`, `coverage`, `manifest`,
-`versioned-files`. Each is documented in [USAGE.md](USAGE.md).
+`versioned-files`, `deps-declared-once`, `test-assertions`. Each is documented
+in [USAGE.md](USAGE.md).
 
 ## Data stores
 
@@ -100,7 +102,7 @@ and writes only to stdout and stderr.
 ## Deployment
 
 Published to PyPI as `shiplock`, MIT-licensed. The package ships `py.typed` and
-`prompts/audit.md` as package data.
+the two prompts (`prompts/audit.md`, `prompts/ablation.md`) as package data.
 
 CI lives in `.github/workflows/`:
 

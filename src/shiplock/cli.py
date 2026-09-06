@@ -33,6 +33,7 @@ EXIT_USAGE = 2
 
 _DESCRIPTION = "Deterministic docs-vs-code release checks."
 _COMMANDS = ("check", "prompt")
+_PROMPT_KINDS = ("audit", "ablation")
 
 _RED = "\033[31m"
 _GREEN = "\033[32m"
@@ -59,6 +60,13 @@ def _humanize(message: str) -> str:
     choice = re.search(r"invalid choice: '([^']+)'", message)
     if choice:
         word = choice.group(1)
+        if "argument kind" in message:
+            near = difflib.get_close_matches(word, _PROMPT_KINDS, n=1, cutoff=0.6)
+            hint = f" Perhaps you meant 'shiplock prompt {near[0]}'?" if near else ""
+            return (
+                f"'{word}' isn't a shiplock prompt; the prompts are "
+                f"{' and '.join(_PROMPT_KINDS)}.{hint}"
+            )
         near = difflib.get_close_matches(word, _COMMANDS, n=1, cutoff=0.6)
         hint = f" Perhaps you meant 'shiplock {near[0]}'?" if near else ""
         return (
@@ -86,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "check":
         return _cmd_check(Path(args.path), as_json=args.json)
-    return _cmd_prompt()
+    return _cmd_prompt(args.kind)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -117,10 +125,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="print the report as one JSON object on stdout",
     )
 
-    sub.add_parser(
+    prompt = sub.add_parser(
         "prompt",
-        help="print the semantic audit prompt for a fresh agent",
+        help="print a prompt for a fresh agent (audit or ablation)",
         allow_abbrev=False,
+    )
+    prompt.add_argument(
+        "kind",
+        nargs="?",
+        default="audit",
+        choices=_PROMPT_KINDS,
+        help="which prompt: the gating docs-vs-code audit (default) or the "
+        "advisory ablation audit",
     )
     return parser
 
@@ -198,10 +214,10 @@ def _render(report: Report) -> None:
         print(_paint(f"shiplock: {n} {word}", _RED, sys.stderr), file=sys.stderr)
 
 
-def _cmd_prompt() -> int:
+def _cmd_prompt(kind: str = "audit") -> int:
     # Anchor on the shiplock package itself, not the prompts subdirectory, which
     # has no __init__ and would otherwise rely on namespace-package resolution.
-    text = files("shiplock").joinpath("prompts", "audit.md").read_text(encoding="utf-8")
+    text = files("shiplock").joinpath("prompts", f"{kind}.md").read_text(encoding="utf-8")
     # The prompt is content; print it verbatim without a trailing reformat.
     sys.stdout.write(text)
     if not text.endswith("\n"):
@@ -217,6 +233,7 @@ def _print_welcome() -> None:
     print("  shiplock check path/to/repo   check any repo, no setup needed")
     print("  shiplock check                check the current directory")
     print("  shiplock prompt               print the semantic audit prompt")
+    print("  shiplock prompt ablation      print the advisory ablation prompt")
     print()
     print("Docs: https://github.com/shehuphd/shiplock")
 

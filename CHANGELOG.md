@@ -3,6 +3,28 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
+## [Unreleased]
+
+### Added
+- Two deterministic checks. `deps-declared-once` (a new `[deps]` section) flags
+  a package declared in both `pyproject.toml` and a requirements file, since
+  two declarations of one dependency drift apart the day one of them is
+  edited. `test-assertions` (a new `[tests]` section) flags a test function
+  carrying no expectation: no `assert`, no `raises`/`warns` context, no
+  `assert_*` call. Both skip with a notice when their section is absent.
+- An advisory ablation prompt, printed by `shiplock prompt ablation`: it asks
+  an agent to report, with measured evidence, what the repo could remove,
+  merge, or make cheaper, split into mechanical folds and owner decisions,
+  ending in a do-first ordering rather than a verdict line. `shiplock prompt`
+  unchanged; `shiplock prompt audit` names the default explicitly.
+
+### Changed
+- The semantic audit prompt gains three questions (docstring claims held
+  against callers, documented-but-unreachable features, packaging claims held
+  against packaging config) and widens the twin-surfaces question to toolchain
+  files: lock files, second environments, and requirements files the docs
+  never mention.
+
 ## [0.2.0] - 2026-09-03
 
 ### Changed
@@ -57,6 +79,7 @@ semantic versioning.
   a GitHub Release is published, behind a reviewer-gated environment.
 - Shiplock as consumer zero: its own `shiplock.toml`, run over the shiplock repo.
 
+[Unreleased]: https://github.com/shehuphd/shiplock/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/shehuphd/shiplock/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/shehuphd/shiplock/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/shehuphd/shiplock/releases/tag/v0.0.1

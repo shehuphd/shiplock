@@ -54,6 +54,12 @@ MUTATIONS = [
     (CHECKS, "if not _manifest_lists(text, rel, path.name):",
      "if False and not _manifest_lists(text, rel, path.name):",
      "tests/test_checks.py::test_manifest_fires_on_unlisted_source_file"),
+    (CHECKS, "if requirement in declared and requirement not in exempt:",
+     "if False and requirement in declared and requirement not in exempt:",
+     "tests/test_checks.py::test_deps_fires_when_a_requirement_duplicates_pyproject"),
+    (CHECKS, "if not _has_expectation(func):",
+     "if False and not _has_expectation(func):",
+     "tests/test_checks.py::test_test_assertions_fires_on_a_test_with_no_expectation"),
 ]
 
 

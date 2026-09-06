@@ -9,6 +9,7 @@ missing (no git tag to diff against, an import that failed).
 
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import sys
@@ -445,6 +446,115 @@ def check_versioned_files(config: Config) -> CheckResult:
     return findings, notices
 
 
+def check_deps(config: Config) -> CheckResult:
+    """Flag a package declared in both pyproject.toml and a requirements file.
+
+    Two declarations of one dependency drift apart the day one of them is
+    edited; the finding names the requirements line so the fix is a deletion.
+    """
+    name = "deps-declared-once"
+    if config.deps is None:
+        return [], [Notice(name, "no [deps] declared; skipped")]
+
+    pyproject = _read_text(config.root / "pyproject.toml")
+    if pyproject is None:
+        return [], [Notice(name, "no pyproject.toml found; skipped")]
+    try:
+        raw = tomllib.loads(pyproject)
+    except tomllib.TOMLDecodeError as exc:
+        return [], [Notice(name, f"pyproject.toml didn't parse: {exc}")]
+
+    declared = _pyproject_dep_names(raw)
+    if not declared:
+        return [], [Notice(name, "pyproject.toml declares no dependencies; skipped")]
+
+    files: list[Path] = []
+    seen: set[Path] = set()
+    for pattern in config.deps.requirements:
+        for path in config.root.glob(pattern):
+            resolved = path.resolve()
+            if path.is_file() and resolved not in seen:
+                seen.add(resolved)
+                files.append(path)
+    if not files:
+        return [], [Notice(name, "[deps].requirements matched no files; skipped")]
+
+    exempt = {_canonical_dep(x) for x in config.deps.exempt}
+    findings: list[Finding] = []
+    for path in files:
+        text = _read_text(path)
+        if text is None:
+            continue
+        rel = _rel(config.root, path)
+        for i, line in enumerate(text.splitlines(), start=1):
+            requirement = _requirement_name(line)
+            if requirement is None:
+                continue
+            if requirement in declared and requirement not in exempt:
+                findings.append(
+                    Finding(
+                        name,
+                        f"'{requirement}' is declared in both pyproject.toml and "
+                        f"{rel}; keep one declaration",
+                        path=rel,
+                        line=i,
+                    )
+                )
+    return findings, []
+
+
+def check_test_assertions(config: Config) -> CheckResult:
+    """Flag a test function that carries no expectation at all.
+
+    A test with no assert, no ``pytest.raises``/``warns``, and no ``assert_*``
+    call passes whatever the code does; it documents nothing and guards
+    nothing. Not-raising is an outcome a test must pin with an explicit check
+    on the side effect, or exempt by name if not-raising truly is the contract.
+    """
+    name = "test-assertions"
+    if config.tests is None:
+        return [], [Notice(name, "no [tests] declared; skipped")]
+
+    files: list[Path] = []
+    seen: set[Path] = set()
+    for pattern in config.tests.globs:
+        for path in config.root.glob(pattern):
+            resolved = path.resolve()
+            if path.is_file() and resolved not in seen:
+                seen.add(resolved)
+                files.append(path)
+    if not files:
+        return [], [Notice(name, "[tests].globs matched no files; skipped")]
+
+    exempt = set(config.tests.exempt)
+    findings: list[Finding] = []
+    notices: list[Notice] = []
+    for path in files:
+        text = _read_text(path)
+        if text is None:
+            continue
+        rel = _rel(config.root, path)
+        try:
+            tree = ast.parse(text)
+        except SyntaxError as exc:
+            notices.append(Notice(name, f"{rel} didn't parse ({exc.msg}); skipped"))
+            continue
+        for func in _test_functions(tree):
+            if func.name in exempt or f"{rel}::{func.name}" in exempt:
+                continue
+            if not _has_expectation(func):
+                findings.append(
+                    Finding(
+                        name,
+                        f"test '{func.name}' has no assertion, raises-check, or "
+                        f"assert_* call; it passes no matter what the code does",
+                        path=rel,
+                        line=func.lineno,
+                    )
+                )
+    return findings, notices
+
+
 # --------------------------------------------------------------------------
 # Check-specific helpers
 # --------------------------------------------------------------------------
@@ -614,6 +724,93 @@ def _check_one_versioned_file(
     return [], []
 
 
+def _canonical_dep(name: str) -> str:
+    """A package name in PEP 503 canonical form: lowercased, separators folded."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _pyproject_dep_names(raw: dict) -> set[str]:
+    """Canonical names of every dependency pyproject.toml declares."""
+    project = raw.get("project", {})
+    if not isinstance(project, dict):
+        return set()
+    specs: list[str] = []
+    deps = project.get("dependencies", [])
+    if isinstance(deps, list):
+        specs.extend(s for s in deps if isinstance(s, str))
+    optional = project.get("optional-dependencies", {})
+    if isinstance(optional, dict):
+        for group in optional.values():
+            if isinstance(group, list):
+                specs.extend(s for s in group if isinstance(s, str))
+    names: set[str] = set()
+    for spec in specs:
+        parsed = _requirement_name(spec)
+        if parsed is not None:
+            names.add(parsed)
+    return names
+
+
+def _requirement_name(line: str) -> str | None:
+    """The canonical package name on a requirements line, or None.
+
+    Comment and blank lines, pip options (``-r``, ``-e``, ``--hash``), and bare
+    URL or path lines carry no comparable name and return None. Extras,
+    specifiers, and environment markers are stripped: only the name is compared.
+    """
+    stripped = line.strip()
+    if not stripped or stripped.startswith(("#", "-")):
+        return None
+    if "://" in stripped.split("#", 1)[0].split(";", 1)[0].split("@", 1)[0]:
+        return None
+    match = re.match(r"[A-Za-z0-9][A-Za-z0-9._-]*", stripped)
+    if match is None:
+        return None
+    return _canonical_dep(match.group(0))
+
+
+# Call names that count as an expectation inside a test body. ``raises`` and
+# ``warns`` cover pytest.raises/warns used as context managers or calls;
+# anything starting with ``assert`` covers unittest's self.assert* and mock's
+# assert_called* family.
+_EXPECTATION_CALLS = {"raises", "warns", "deprecated_call"}
+
+
+def _test_functions(tree: ast.Module):
+    """Test functions pytest would collect: module-level ``test_*`` functions
+    and ``test_*`` methods of ``Test*`` classes, at any nesting of the latter."""
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name.startswith("test_"):
+                yield node
+        elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+            for item in ast.walk(node):
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if item.name.startswith("test_"):
+                        yield item
+
+
+def _call_name(call: ast.Call) -> str:
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    return ""
+
+
+def _has_expectation(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """True when the test body holds any assert, raises/warns context, or
+    ``assert*`` call anywhere in its tree (helpers defined inline included)."""
+    for node in ast.walk(func):
+        if isinstance(node, ast.Assert):
+            return True
+        if isinstance(node, ast.Call):
+            called = _call_name(node)
+            if called in _EXPECTATION_CALLS or called.startswith("assert"):
+                return True
+    return False
+
+
 # --------------------------------------------------------------------------
 # Runner
 # --------------------------------------------------------------------------
@@ -629,6 +826,8 @@ _CHECKS = (
     check_coverage,
     check_manifest,
     check_versioned_files,
+    check_deps,
+    check_test_assertions,
 )
 
 

@@ -87,6 +87,25 @@ class VersionedFile:
 
 
 @dataclass(frozen=True)
+class DepsConfig:
+    # Globs naming the requirements files to hold against pyproject.toml.
+    requirements: list[str]
+    exempt: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class TestsConfig:
+    # Globs naming the test files whose test functions must each carry an
+    # expectation (an assert, a pytest.raises, an assert_* call).
+    globs: list[str]
+    exempt: list[str] = field(default_factory=list)
+
+    # The Test* name makes pytest try to collect this class wherever it's
+    # imported into a test module; this opts it out.
+    __test__ = False
+
+
+@dataclass(frozen=True)
 class Config:
     """A repo's fully-parsed shiplock config, rooted at ``root``."""
 
@@ -98,6 +117,8 @@ class Config:
     manifest: ManifestConfig | None = None
     coverage: list[CoverageEntry] = field(default_factory=list)
     versioned_files: list[VersionedFile] = field(default_factory=list)
+    deps: DepsConfig | None = None
+    tests: TestsConfig | None = None
 
 
 _DEFAULT_DOC_NAMES = (
@@ -165,6 +186,8 @@ def _parse(root: Path, raw: dict) -> Config:
         "manifest",
         "coverage",
         "versioned_files",
+        "deps",
+        "tests",
     }
     unknown = set(raw) - known
     if unknown:
@@ -183,6 +206,8 @@ def _parse(root: Path, raw: dict) -> Config:
         manifest=_parse_manifest(raw.get("manifest")),
         coverage=_parse_coverage(raw.get("coverage")),
         versioned_files=_parse_versioned_files(raw.get("versioned_files")),
+        deps=_parse_deps(raw.get("deps")),
+        tests=_parse_tests(raw.get("tests")),
     )
 
 
@@ -322,6 +347,37 @@ def _parse_versioned_files(section: object) -> list[VersionedFile]:
             )
         )
     return entries
+
+
+def _parse_deps(section: object) -> DepsConfig | None:
+    if section is None:
+        return None
+    if not isinstance(section, dict):
+        raise ConfigError("[deps] must be a table.")
+    if "requirements" not in section:
+        raise ConfigError(
+            "[deps] requires 'requirements': the globs naming the requirements "
+            "files to hold against pyproject.toml."
+        )
+    return DepsConfig(
+        requirements=_require_str_list(section["requirements"], "[deps].requirements"),
+        exempt=_require_str_list(section.get("exempt", []), "[deps].exempt"),
+    )
+
+
+def _parse_tests(section: object) -> TestsConfig | None:
+    if section is None:
+        return None
+    if not isinstance(section, dict):
+        raise ConfigError("[tests] must be a table.")
+    if "globs" not in section:
+        raise ConfigError(
+            "[tests] requires 'globs': the globs naming the test files to scan."
+        )
+    return TestsConfig(
+        globs=_require_str_list(section["globs"], "[tests].globs"),
+        exempt=_require_str_list(section.get("exempt", []), "[tests].exempt"),
+    )
 
 
 def _opt_str(value: object, where: str) -> str | None:

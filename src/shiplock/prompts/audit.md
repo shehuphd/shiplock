@@ -9,8 +9,10 @@ is still a defect, and delta-focused review is blind to it.
 The deterministic checks (`shiplock check`) have already run and cover the
 mechanical facts: missing docs, banned words, internal references in public
 docs, absolute README links, version alignment, the architecture module list,
-object coverage, the per-file manifest, versioned-file markers. Do not re-do
-their work. Yours is the semantic layer they can't reach.
+object coverage, the per-file manifest, versioned-file markers, dependency
+declarations duplicated between pyproject and requirements files, and tests
+with no assertion. Do not re-do their work. Yours is the semantic layer they
+can't reach.
 
 ## How to work
 
@@ -58,7 +60,11 @@ Work through these questions. Each one comes from a documented miss.
    truth rather than eyeballed as roughly right?
 
 6. **Twin surfaces.** Does the sweep include every twin: all example and template
-   files, launchers, bundled config? An example file is a doc surface too.
+   files, launchers, bundled config? An example file is a doc surface too. The
+   toolchain is a twin as well: the installer and environment the docs instruct
+   must be what the tree carries. A lock file for a tool no doc mentions, a
+   second requirements file or environment the README makes the reader build,
+   is a disagreement between doc and tree even though both sides are files.
 
 7. **Internal tracking (only where the files exist).** Is every shipped feature
    ticked in the internal roadmap with a date? Is every fixed defect struck in
@@ -76,6 +82,25 @@ Work through these questions. Each one comes from a documented miss.
    touched? A deterministic check can confirm a file is listed; only reading the
    file can confirm the description hasn't rotted. When the repo keeps no
    manifest, skip this question and say so.
+
+10. **Docstrings and stated purpose.** Docstrings and comments are doc surfaces.
+    Where one claims a call flow ("retrieval starts from this method"), hold it
+    against the callers: does anything still enter there? Where one states a
+    purpose ("written for diagnosing a stale cache"), does anything fulfil that
+    purpose, or has its consumer gone? A docstring describing a flow the code
+    left behind is drift even though no public doc changed.
+
+11. **Documented but unreachable.** For every route, command, flag, or API the
+    docs or changelog describe, can a user reach it: a button, a link, a CLI
+    path, a documented call? The inverse of question 2. A capability the
+    changelog announces that nothing in the product invokes is either missing
+    its entry point or overdue for removal; the finding names which docs claim
+    it and what would have to invoke it.
+
+12. **Packaging claims.** Where a file's own text declares its shipping intent
+    ("a development aid, never a shipped provider"), hold that against the
+    packaging config: does the wheel or distribution carry it anyway? Does the
+    manifest or architecture doc describe what ships as what ships?
 
 ## Output
 

@@ -95,6 +95,8 @@ you want more coverage — nothing forces you to fill in the rest.
 | `[manifest]` | `manifest` (the per-file map exists, lists every source file, and moves with them) | a reminder notice suggests keeping one; `remind = false` silences it |
 | `[[coverage]]` | `coverage` — one entry per documented object, repeatable | object coverage isn't checked |
 | `[[versioned_files]]` | `versioned-files` — one entry per data file, repeatable | marker movement isn't checked |
+| `[deps]` | `deps-declared-once` (requirements files vs pyproject) | duplicate dependency declarations aren't checked |
+| `[tests]` | `test-assertions` (every test carries an expectation) | assertion-free tests aren't checked |
 
 ### The complete config, annotated
 
@@ -139,11 +141,19 @@ exempt = []
 [[versioned_files]]          # optional, repeatable: one table per versioned data file
 path = "src/pkg/data.json"
 pattern = '"data_version":\s*"([^"]+)"'   # a regex with a single capture group
+
+[deps]                       # optional: omit to skip duplicate-declaration checks
+requirements = ["requirements*.txt", "tools/requirements*.txt"]
+exempt = []                  # names allowed in both places
+
+[tests]                      # optional: omit to skip the assertion check
+globs = ["tests/**/*.py"]
+exempt = []                  # test names, or "path::test_name", allowed without one
 ```
 
 ## The checks
 
-Nine deterministic checks, run in this order:
+Eleven deterministic checks, run in this order:
 
 | Check | Asserts |
 |---|---|
@@ -156,6 +166,8 @@ Nine deterministic checks, run in this order:
 | `coverage` | Every member of a declared object appears in its declared doc. Three kinds: `enum` (member names), `params` (a callable's parameter names), `exports` (a module's `__all__`). |
 | `manifest` | The per-file manifest exists, carries a `Last updated:` line, lists every source file matched by its globs (by path or file name), and changed whenever the sources changed since the last git tag. With no `[manifest]` declared, the check prints a reminder notice instead — see below. |
 | `versioned-files` | A declared data file whose content differs from the last reachable git tag has moved its version marker. |
+| `deps-declared-once` | No package is declared in both `pyproject.toml` (dependencies and optional groups) and a requirements file matched by `[deps].requirements`. Names compare in canonical form, so `Foo_Bar` and `foo-bar` are one package; comment, option, and URL lines are ignored. |
+| `test-assertions` | Every test function in the files matched by `[tests].globs` (module-level `test_*`, and `test_*` methods of `Test*` classes) contains an expectation: an `assert`, a `raises`/`warns` context, or a call whose name starts with `assert`. A test that only relies on code not raising should assert the side effect it exists to pin, or be exempted by name. |
 
 ### The manifest reminder
 
@@ -226,6 +238,20 @@ The prompt ends with a machine-greppable verdict line, `AUDIT: PASS` or
 `AUDIT: FAIL`, so a CI job can act on the outcome. The prompt ships inside the
 package and is centrally versioned, so every repo picks up updates on the next
 install rather than copying a snapshot.
+
+A second prompt ships alongside it, outside the gate:
+
+```bash
+shiplock prompt ablation
+```
+
+This one asks an agent for an advisory report on what the repo could remove,
+merge, or make cheaper: dead code, duplicates, inefficiency visible from the
+source, packaging and toolchain redundancy, assertion-free or status-code-only
+tests, and size hot spots. Every claim must be measured against the tree, and
+findings split into mechanical folds (safe now) and decisions (the owner's
+call). It ends with a do-first ordering instead of a verdict line, so nothing
+wires it into CI; run it when you want the report.
 
 ## Use it in CI
 
