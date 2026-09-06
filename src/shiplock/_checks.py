@@ -61,6 +61,19 @@ def _mentions(text: str, name: str) -> bool:
     return re.search(rf"\b{re.escape(name)}\b", text) is not None
 
 
+def _globbed_files(root: Path, patterns: list[str]) -> list[Path]:
+    """Files matched by ``patterns`` under ``root``, deduplicated, glob order."""
+    files: list[Path] = []
+    seen: set[Path] = set()
+    for pattern in patterns:
+        for path in root.glob(pattern):
+            resolved = path.resolve()
+            if path.is_file() and resolved not in seen:
+                seen.add(resolved)
+                files.append(path)
+    return files
+
+
 # --------------------------------------------------------------------------
 # Checks
 # --------------------------------------------------------------------------
@@ -384,14 +397,9 @@ def check_manifest(config: Config) -> CheckResult:
     exempt: set[Path] = set()
     for pattern in m.exempt:
         exempt.update(p.resolve() for p in config.root.glob(pattern))
-    sources: list[Path] = []
-    seen: set[Path] = set()
-    for pattern in m.sources:
-        for path in config.root.glob(pattern):
-            resolved = path.resolve()
-            if path.is_file() and resolved not in exempt and resolved not in seen:
-                seen.add(resolved)
-                sources.append(path)
+    sources = [
+        p for p in _globbed_files(config.root, m.sources) if p.resolve() not in exempt
+    ]
 
     for path in sources:
         rel = _rel(config.root, path)
@@ -468,14 +476,7 @@ def check_deps(config: Config) -> CheckResult:
     if not declared:
         return [], [Notice(name, "pyproject.toml declares no dependencies; skipped")]
 
-    files: list[Path] = []
-    seen: set[Path] = set()
-    for pattern in config.deps.requirements:
-        for path in config.root.glob(pattern):
-            resolved = path.resolve()
-            if path.is_file() and resolved not in seen:
-                seen.add(resolved)
-                files.append(path)
+    files = _globbed_files(config.root, config.deps.requirements)
     if not files:
         return [], [Notice(name, "[deps].requirements matched no files; skipped")]
 
@@ -515,14 +516,7 @@ def check_test_assertions(config: Config) -> CheckResult:
     if config.tests is None:
         return [], [Notice(name, "no [tests] declared; skipped")]
 
-    files: list[Path] = []
-    seen: set[Path] = set()
-    for pattern in config.tests.globs:
-        for path in config.root.glob(pattern):
-            resolved = path.resolve()
-            if path.is_file() and resolved not in seen:
-                seen.add(resolved)
-                files.append(path)
+    files = _globbed_files(config.root, config.tests.globs)
     if not files:
         return [], [Notice(name, "[tests].globs matched no files; skipped")]
 
@@ -567,8 +561,7 @@ def _banned_targets(config: Config) -> list[Path]:
     if config.docs:
         paths.extend(root / rel for rel in config.docs.public)
     if config.style:
-        for pattern in config.style.source_globs:
-            paths.extend(p for p in root.glob(pattern) if p.is_file())
+        paths.extend(_globbed_files(root, config.style.source_globs))
 
     excluded: set[Path] = set()
     if config.style:
