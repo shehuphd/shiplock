@@ -200,7 +200,6 @@ the check turns that into a notice instead of a finding:
 | `no_all` | An `exports` target has no `__all__` | `coverage` |
 | `not_enum` | An `enum` target isn't an `Enum` | `coverage` |
 | `not_callable` | A `params` target isn't callable | `coverage` |
-| `unknown_op` | The `[[coverage]]` entry's `kind` isn't one of `enum`, `params`, `exports` | `coverage` |
 
 When a check can't run for a reason outside introspection — a source directory
 that isn't there, no git tag to diff against — it prints a notice naming the
