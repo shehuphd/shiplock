@@ -1,8 +1,79 @@
 # Architecture
 
-How shiplock is put together. The package is small and dependency-free by
-design: standard library only, with the `tomli` backport pulled in on Python
-3.10 alone.
+What this document holds: a quick-reference STRuFO summary of shiplock, then
+the full map of its structure, components, integrations, and testing.
+
+## STRuFO
+
+[S]hape, [T]echnical stack, [Ru]n details, [F]ailure modes, [O]bservability.
+
+### Shape
+
+Shiplock is a docs-vs-code release gate: eleven deterministic checks that run
+the same way in a terminal, a test suite, and CI, plus two shipped agent
+prompts (the gating semantic audit and an advisory ablation report), all
+configured per repo by one `shiplock.toml`.
+
+### Technical stack
+
+- Python 3.10–3.13; the runtime is standard library only, with the `tomli`
+  backport pulled in on 3.10 alone.
+- Packaging: setuptools, published to PyPI through trusted publishing (OIDC)
+  from a GitHub Actions release workflow.
+- CI: GitHub Actions; the reusable gate (`gate.yml`) drives an agent CLI
+  (Claude Code or Codex) for the semantic audit and prices its usage with
+  [rates](https://pypi.org/project/rates/).
+- Tests: pytest with pytest-randomly enforced, plus pyyaml and rates for the
+  gate-workflow tests.
+
+### Run details
+
+#### Plain-English version
+
+A check run loads the repo's config, or builds the default one when no config
+file exists, then hands it to each of the eleven checks in a fixed order.
+Every check reads what it needs (files, git, or a subprocess import of the
+checked package), reports each disagreement as a finding and each skip as a
+notice, and the CLI prints findings to stdout, notices and the summary to
+stderr, and exits 0 clean, 1 findings, 2 config or usage error.
+
+#### Technical version
+
+- `cli.main` parses argv through `_build_parser` and dispatches `check` to
+  `cli._cmd_check`.
+- `_config.load_config` (or `_config.default_config` when no `shiplock.toml`
+  exists) parses and validates the config into a frozen `Config`.
+- `_checks.run_checks` iterates the `_CHECKS` tuple; each check returns
+  `(findings, notices)`, folded into one `_report.Report`.
+- `version` and `coverage` call `_introspect.introspect`, a subprocess that
+  binds `sys.path` to the checked root; `manifest` and `versioned-files`
+  shell out to `git`; `test-assertions` parses test files with `ast`;
+  `deps-declared-once` parses TOML via `_compat.tomllib`.
+- `cli._render` prints the report; the exit code comes from `Report.ok`.
+
+### Failure modes
+
+| Cause | Handling |
+|---|---|
+| Missing or malformed `shiplock.toml` | `ConfigError`, rendered as one plain sentence on stderr; exit 2 |
+| A check finds a docs-vs-code disagreement | `Finding` on stdout; exit 1 |
+| A check's prerequisite is absent (no git tag, package won't import, glob matches nothing) | `Notice` on stderr naming the reason and fix; the run continues, and a skip is never a silent pass |
+| A swept file is unreadable or not valid UTF-8 | Read leniently or skipped by `_read_text`; ASCII patterns still match |
+| The CI audit dies mid-run | The fallback key's attempt continues from the audit's own progress log; a missing verdict line fails closed |
+| No audit key secret configured in CI | The audit is skipped with a workflow warning; the deterministic checks still gate the run |
+
+### Observability
+
+- `shiplock check --json` emits the report's canonical machine shape on
+  stdout, nothing else.
+- Every check that didn't run says so as a notice with its reason; silence
+  never means skipped.
+- The test suite writes a per-run CSV artifact under `.test-runs/`, rows
+  sorted so any two runs produce a readable diff.
+- In CI, the job summary carries each audit attempt's token usage and a
+  rates-priced USD cost; a failed audit opens an issue carrying its findings,
+  and a failed run uploads the audit's raw output as an
+  `audit-debug-<run id>` artifact.
 
 ## Project structure
 
