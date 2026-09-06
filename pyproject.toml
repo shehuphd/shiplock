@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "shiplock"
 version = "0.3.0"
-description = "Deterministic docs-vs-code release checks, config-driven per repo, runnable locally, in pytest, and in CI."
+description = "Docs-vs-code release checks: deterministic checks plus semantic and ablation audit prompts, config-driven per repo, runnable locally, in pytest, and in CI."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

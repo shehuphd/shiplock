@@ -31,7 +31,7 @@ EXIT_OK = 0
 EXIT_FINDINGS = 1
 EXIT_USAGE = 2
 
-_DESCRIPTION = "Deterministic docs-vs-code release checks."
+_DESCRIPTION = "Docs-vs-code release checks: deterministic, plus semantic and ablation audit prompts."
 _COMMANDS = ("check", "prompt")
 _PROMPT_KINDS = ("audit", "ablation")
 

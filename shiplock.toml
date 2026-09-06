@@ -1,5 +1,8 @@
-# Shiplock's own release-gate config. Consumer zero: shiplock checks itself
-# with the same package every other repo consumes.
+# Shiplock config: docs-vs-code release checks, deterministic and
+# agent-audited (semantic and ablation prompts included).
+# Install: pip install shiplock. Docs: https://github.com/shehuphd/shiplock
+# Consumer zero: shiplock checks itself with the same package every other
+# repo consumes.
 
 [docs]
 public = ["README.md", "USAGE.md", "ARCHITECTURE.md", "CHANGELOG.md", "MANIFEST.md"]

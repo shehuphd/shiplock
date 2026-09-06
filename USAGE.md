@@ -100,9 +100,15 @@ you want more coverage — nothing forces you to fill in the rest.
 
 ### The complete config, annotated
 
-Every section shiplock understands. Copy what you need and delete the rest:
+Every section shiplock understands. Copy what you need and delete the rest,
+keeping the header comment: it tells anyone reading your repo's config (a
+teammate, an agent scanning the tree) what checks it, and where to get it.
 
 ```toml
+# Shiplock config: docs-vs-code release checks, deterministic and
+# agent-audited (semantic and ablation prompts included).
+# Install: pip install shiplock. Docs: https://github.com/shehuphd/shiplock
+
 [docs]
 # The docs shiplock treats as public. Name the files you ship — this
 # list is yours, not a fixed set.
