@@ -3,7 +3,7 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
-## [Unreleased]
+## [0.3.0] - 2026-09-06
 
 ### Added
 - Two deterministic checks. `deps-declared-once` (a new `[deps]` section) flags
@@ -24,6 +24,10 @@ semantic versioning.
   against packaging config) and widens the twin-surfaces question to toolchain
   files: lock files, second environments, and requirements files the docs
   never mention.
+
+### Fixed
+- `TestsConfig` no longer triggers pytest's collection warning when imported
+  into a test module (pytest read the `Test*` prefix as a test class).
 
 ## [0.2.0] - 2026-09-03
 
@@ -79,7 +83,7 @@ semantic versioning.
   a GitHub Release is published, behind a reviewer-gated environment.
 - Shiplock as consumer zero: its own `shiplock.toml`, run over the shiplock repo.
 
-[Unreleased]: https://github.com/shehuphd/shiplock/compare/v0.2.0...HEAD
+[0.3.0]: https://github.com/shehuphd/shiplock/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/shehuphd/shiplock/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/shehuphd/shiplock/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/shehuphd/shiplock/releases/tag/v0.0.1
