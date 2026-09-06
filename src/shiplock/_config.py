@@ -211,6 +211,12 @@ def _parse(root: Path, raw: dict) -> Config:
     )
 
 
+def _require_table(section: object, where: str) -> dict:
+    if not isinstance(section, dict):
+        raise ConfigError(f"{where} must be a table.")
+    return section
+
+
 def _require_str_list(value: object, where: str) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
         raise ConfigError(f"{where} must be a list of strings.")
@@ -226,8 +232,7 @@ def _require_str(value: object, where: str) -> str:
 def _parse_docs(section: object) -> DocsConfig | None:
     if section is None:
         return None
-    if not isinstance(section, dict):
-        raise ConfigError("[docs] must be a table.")
+    _require_table(section, "[docs]")
     return DocsConfig(
         public=_require_str_list(section.get("public", []), "[docs].public"),
         changelog=_opt_str(section.get("changelog"), "[docs].changelog"),
@@ -238,8 +243,7 @@ def _parse_docs(section: object) -> DocsConfig | None:
 def _parse_style(section: object) -> StyleConfig | None:
     if section is None:
         return None
-    if not isinstance(section, dict):
-        raise ConfigError("[style] must be a table.")
+    _require_table(section, "[style]")
     return StyleConfig(
         extra_banned=_require_str_list(
             section.get("extra_banned", []), "[style].extra_banned"
@@ -255,16 +259,14 @@ def _parse_style(section: object) -> StyleConfig | None:
 def _parse_version(section: object) -> VersionConfig | None:
     if section is None:
         return None
-    if not isinstance(section, dict):
-        raise ConfigError("[version] must be a table.")
+    _require_table(section, "[version]")
     return VersionConfig(package=_opt_str(section.get("package"), "[version].package"))
 
 
 def _parse_architecture(section: object) -> ArchitectureConfig | None:
     if section is None:
         return None
-    if not isinstance(section, dict):
-        raise ConfigError("[architecture] must be a table.")
+    _require_table(section, "[architecture]")
     if "doc" not in section or "source_dir" not in section:
         raise ConfigError("[architecture] requires both 'doc' and 'source_dir'.")
     return ArchitectureConfig(
@@ -277,8 +279,7 @@ def _parse_architecture(section: object) -> ArchitectureConfig | None:
 def _parse_manifest(section: object) -> ManifestConfig | None:
     if section is None:
         return None
-    if not isinstance(section, dict):
-        raise ConfigError("[manifest] must be a table.")
+    _require_table(section, "[manifest]")
     doc = _opt_str(section.get("doc"), "[manifest].doc")
     remind = section.get("remind", True)
     if not isinstance(remind, bool):
@@ -306,8 +307,7 @@ def _parse_coverage(section: object) -> list[CoverageEntry]:
     entries: list[CoverageEntry] = []
     for i, item in enumerate(section):
         where = f"[[coverage]] entry {i}"
-        if not isinstance(item, dict):
-            raise ConfigError(f"{where} must be a table.")
+        _require_table(item, where)
         for key in ("object", "doc", "kind"):
             if key not in item:
                 raise ConfigError(f"{where} is missing required key '{key}'.")
@@ -335,8 +335,7 @@ def _parse_versioned_files(section: object) -> list[VersionedFile]:
     entries: list[VersionedFile] = []
     for i, item in enumerate(section):
         where = f"[[versioned_files]] entry {i}"
-        if not isinstance(item, dict):
-            raise ConfigError(f"{where} must be a table.")
+        _require_table(item, where)
         for key in ("path", "pattern"):
             if key not in item:
                 raise ConfigError(f"{where} is missing required key '{key}'.")
@@ -352,8 +351,7 @@ def _parse_versioned_files(section: object) -> list[VersionedFile]:
 def _parse_deps(section: object) -> DepsConfig | None:
     if section is None:
         return None
-    if not isinstance(section, dict):
-        raise ConfigError("[deps] must be a table.")
+    _require_table(section, "[deps]")
     if "requirements" not in section:
         raise ConfigError(
             "[deps] requires 'requirements': the globs naming the requirements "
@@ -368,8 +366,7 @@ def _parse_deps(section: object) -> DepsConfig | None:
 def _parse_tests(section: object) -> TestsConfig | None:
     if section is None:
         return None
-    if not isinstance(section, dict):
-        raise ConfigError("[tests] must be a table.")
+    _require_table(section, "[tests]")
     if "globs" not in section:
         raise ConfigError(
             "[tests] requires 'globs': the globs naming the test files to scan."
