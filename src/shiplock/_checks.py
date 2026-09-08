@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from shiplock import _style
@@ -511,27 +512,23 @@ def check_test_assertions(config: Config) -> CheckResult:
     if config.tests is None:
         return [], [Notice(name, "no [tests] declared; skipped")]
 
-    files = _globbed_files(config.root, config.tests.globs)
-    if not files:
+    scanned = _globbed_files(config.root, config.tests.globs)
+    if not scanned:
         return [], [Notice(name, "[tests].globs matched no files; skipped")]
+
+    index, notices = _index_modules(config.root, _index_paths(config.root, scanned), name)
+    scanned_keys = {_module_dotted(config.root, p) for p in scanned}
 
     exempt = set(config.tests.exempt)
     findings: list[Finding] = []
-    notices: list[Notice] = []
-    for path in files:
-        text = _read_text(path)
-        if text is None:
+    for key, module in index.items():
+        if key not in scanned_keys:
             continue
-        rel = _rel(config.root, path)
-        try:
-            tree = ast.parse(text)
-        except SyntaxError as exc:
-            notices.append(Notice(name, f"{rel} didn't parse ({exc.msg}); skipped"))
-            continue
-        for func in _test_functions(tree):
+        rel = _rel(config.root, module.path)
+        for func in _test_functions(module.tree):
             if func.name in exempt or f"{rel}::{func.name}" in exempt:
                 continue
-            if not _has_expectation(func):
+            if not _has_expectation(func, module, index):
                 findings.append(
                     Finding(
                         name,
@@ -786,9 +783,217 @@ def _call_name(call: ast.Call) -> str:
     return ""
 
 
-def _has_expectation(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    """True when the test body holds any assert, raises/warns context, or
-    ``assert*`` call anywhere in its tree (helpers defined inline included)."""
+def _dotted_target(node: ast.expr) -> str | None:
+    """An attribute/name chain as a dotted string: ``a.b.c``, or None."""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+@dataclass(frozen=True)
+class _TestModule:
+    """One parsed module of the test set, with what it defines and imports."""
+
+    dotted: str
+    path: Path
+    tree: ast.Module
+    functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef]
+    # local name -> (module, relative level, name in that module)
+    from_imports: dict[str, tuple[str, int, str]]
+    # local alias -> the module it names (``import a.b as c``, ``import a.b``)
+    module_aliases: dict[str, str]
+
+
+def _module_dotted(root: Path, path: Path) -> str:
+    """``tests/support/helpers.py`` -> ``tests.support.helpers``."""
+    try:
+        relative = path.resolve().relative_to(root.resolve())
+    except ValueError:
+        relative = Path(path.name)
+    return ".".join(relative.with_suffix("").parts)
+
+
+def _conftest_files(root: Path, scanned: list[Path]) -> list[Path]:
+    """Every ``conftest.py`` from each scanned file's directory up to root."""
+    found: list[Path] = []
+    seen: set[Path] = set()
+    root_resolved = root.resolve()
+    for path in scanned:
+        directory = path.resolve().parent
+        while True:
+            candidate = directory / "conftest.py"
+            if candidate.is_file() and candidate not in seen:
+                seen.add(candidate)
+                found.append(candidate)
+            if directory == root_resolved or root_resolved not in directory.parents:
+                break
+            directory = directory.parent
+    return found
+
+
+def _index_paths(root: Path, scanned: list[Path]) -> list[Path]:
+    """Every module resolution may need to read: the whole test tree.
+
+    A shared helper lives beside the tests as often as inside them, in a
+    ``support/`` subpackage the test globs don't match, so the index covers
+    each scanned file's own directory tree rather than the globs alone, plus
+    any ``conftest.py`` above it.
+    """
+    directories = {p.resolve().parent for p in scanned}
+    tops = [d for d in directories if not any(other in d.parents for other in directories)]
+
+    paths: list[Path] = []
+    seen: set[Path] = set()
+    for directory in sorted(tops):
+        for path in sorted(directory.rglob("*.py")):
+            resolved = path.resolve()
+            if path.is_file() and resolved not in seen:
+                seen.add(resolved)
+                paths.append(path)
+    for path in _conftest_files(root, scanned):
+        resolved = path.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            paths.append(path)
+    return paths
+
+
+def _index_modules(
+    root: Path, paths: list[Path], check: str
+) -> tuple[dict[str, _TestModule], list[Notice]]:
+    """Parse each path once into the index resolution reads from."""
+    index: dict[str, _TestModule] = {}
+    notices: list[Notice] = []
+    for path in paths:
+        text = _read_text(path)
+        if text is None:
+            continue
+        try:
+            tree = ast.parse(text)
+        except SyntaxError as exc:
+            notices.append(
+                Notice(check, f"{_rel(root, path)} didn't parse ({exc.msg}); skipped")
+            )
+            continue
+        functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+        from_imports: dict[str, tuple[str, int, str]] = {}
+        module_aliases: dict[str, str] = {}
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                functions[node.name] = node
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    local = alias.asname or alias.name
+                    from_imports[local] = (node.module or "", node.level, alias.name)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    local = alias.asname or alias.name.split(".")[0]
+                    module_aliases[local] = alias.name
+        index[_module_dotted(root, path)] = _TestModule(
+            dotted=_module_dotted(root, path),
+            path=path,
+            tree=tree,
+            functions=functions,
+            from_imports=from_imports,
+            module_aliases=module_aliases,
+        )
+    return index, notices
+
+
+def _find_module(
+    dotted: str, level: int, importer: _TestModule, index: dict[str, _TestModule]
+) -> _TestModule | None:
+    """The indexed module an import names, or None when it's outside the set.
+
+    A relative import resolves against the importer's own package. An absolute
+    one matches an indexed module outright or by dotted-path suffix, since a
+    test set is importable from its own root as well as the repo root; an
+    ambiguous suffix resolves to nothing rather than a guess.
+    """
+    if level:
+        parts = importer.dotted.split(".")[:-1]
+        if level > 1:
+            parts = parts[: len(parts) - (level - 1)]
+        if dotted:
+            parts = parts + dotted.split(".")
+        return index.get(".".join(parts))
+    if not dotted:
+        return None
+    if dotted in index:
+        return index[dotted]
+    matches = [m for key, m in index.items() if key.endswith("." + dotted)]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _resolve_call(
+    call: ast.Call, module: _TestModule, index: dict[str, _TestModule]
+) -> tuple[_TestModule, ast.FunctionDef | ast.AsyncFunctionDef] | None:
+    """The test-set function a call names, or None when it resolves outside.
+
+    Resolving outside the set is the ordinary case: the code under test, a
+    method on a fixture, a builtin. Those are never expectations, so a call
+    the index can't place is left alone.
+    """
+    dotted = _dotted_target(call.func)
+    if dotted is None:
+        return None
+    parts = dotted.split(".")
+
+    if len(parts) == 1:
+        name = parts[0]
+        own = module.functions.get(name)
+        if own is not None:
+            return module, own
+        if name in module.from_imports:
+            source, level, original = module.from_imports[name]
+            target = _find_module(source, level, module, index)
+            if target is not None and original in target.functions:
+                return target, target.functions[original]
+        return None
+
+    func_name = parts[-1]
+    prefix = ".".join(parts[:-1])
+    # `import tests.helpers as h` / `import tests.helpers`, then h.check()
+    candidate = module.module_aliases.get(prefix)
+    level = 0
+    if candidate is None and prefix in module.from_imports:
+        # `from tests import helpers`, then helpers.check()
+        source, level, original = module.from_imports[prefix]
+        candidate = f"{source}.{original}" if source else original
+    if candidate is None:
+        candidate = prefix
+    target = _find_module(candidate, level, module, index)
+    if target is not None and func_name in target.functions:
+        return target, target.functions[func_name]
+    return None
+
+
+def _has_expectation(
+    func: ast.FunctionDef | ast.AsyncFunctionDef,
+    module: _TestModule,
+    index: dict[str, _TestModule],
+    _seen: set[tuple[str, str]] | None = None,
+) -> bool:
+    """True when the test pins an outcome, directly or through a helper.
+
+    Direct: an assert, a raises/warns context, an ``assert*`` call, anywhere in
+    the test's own tree (inline helpers included). Indirect: a call to any
+    function in the scanned test set, followed recursively, so a shared
+    ``_expect_x(...)`` helper counts for every test that calls it. The seen set
+    makes mutual recursion terminate.
+    """
+    if _seen is None:
+        _seen = set()
+    key = (module.dotted, func.name)
+    if key in _seen:
+        return False
+    _seen.add(key)
+
     for node in ast.walk(func):
         if isinstance(node, ast.Assert):
             return True
@@ -796,6 +1001,11 @@ def _has_expectation(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
             called = _call_name(node)
             if called in _EXPECTATION_CALLS or called.startswith("assert"):
                 return True
+            resolved = _resolve_call(node, module, index)
+            if resolved is not None:
+                target_module, target_func = resolved
+                if _has_expectation(target_func, target_module, index, _seen):
+                    return True
     return False
 
 

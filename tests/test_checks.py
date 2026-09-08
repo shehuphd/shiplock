@@ -760,3 +760,146 @@ def test_test_assertions_undeclared_section_skips_with_notice(tmp_path):
     findings, notices = check_test_assertions(Config(root=tmp_path))
     assert findings == []
     assert any("no [tests]" in n.message for n in notices)
+
+
+# --- test-assertions: helper resolution -----------------------------------
+
+
+def test_test_assertions_follows_a_same_module_helper(tmp_path, write_file):
+    # The shape a shared refusal helper takes: pytest.raises plus content
+    # asserts, called by every test in the file.
+    write_file(
+        tmp_path,
+        "tests/test_retired.py",
+        "import pytest\n\n"
+        "def _expect_retired(fn):\n"
+        "    with pytest.raises(ValueError) as caught:\n"
+        "        fn()\n"
+        "    assert 'retired' in str(caught.value)\n\n"
+        "def test_embedding_refuses(client):\n"
+        "    _expect_retired(client.embed)\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert findings == []
+
+
+def test_test_assertions_follows_a_relative_import(tmp_path, write_file):
+    write_file(tmp_path, "tests/helpers.py", "def expect_ok(v):\n    assert v == 'ok'\n")
+    write_file(
+        tmp_path,
+        "tests/test_rel.py",
+        "from .helpers import expect_ok\n\n"
+        "def test_value(client):\n    expect_ok(client.value)\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert findings == []
+
+
+def test_test_assertions_follows_an_absolute_import(tmp_path, write_file):
+    write_file(
+        tmp_path, "tests/support/helpers.py", "def expect_ok(v):\n    assert v == 'ok'\n"
+    )
+    write_file(
+        tmp_path,
+        "tests/test_abs.py",
+        "from tests.support.helpers import expect_ok\n\n"
+        "def test_value(client):\n    expect_ok(client.value)\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert findings == []
+
+
+def test_test_assertions_follows_a_renamed_import(tmp_path, write_file):
+    # Imported under a shorter root (pytest puts the test dir on sys.path) and
+    # bound to a different local name.
+    write_file(
+        tmp_path, "tests/support/helpers.py", "def expect_ok(v):\n    assert v == 'ok'\n"
+    )
+    write_file(
+        tmp_path,
+        "tests/test_renamed.py",
+        "from support.helpers import expect_ok as ok\n\n"
+        "def test_value(client):\n    ok(client.value)\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert findings == []
+
+
+def test_test_assertions_follows_a_module_attribute_call(tmp_path, write_file):
+    write_file(
+        tmp_path, "tests/support/helpers.py", "def expect_ok(v):\n    assert v == 'ok'\n"
+    )
+    write_file(
+        tmp_path,
+        "tests/test_attr.py",
+        "from tests.support import helpers\n"
+        "import tests.support.helpers as aliased\n\n"
+        "def test_via_module(client):\n    helpers.expect_ok(client.value)\n\n"
+        "def test_via_alias(client):\n    aliased.expect_ok(client.value)\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert findings == []
+
+
+def test_test_assertions_follows_a_helper_in_conftest(tmp_path, write_file):
+    # conftest joins the index even when the globs name only test_* files.
+    write_file(tmp_path, "tests/conftest.py", "def expect_ok(v):\n    assert v == 'ok'\n")
+    write_file(
+        tmp_path,
+        "tests/test_conf.py",
+        "from conftest import expect_ok\n\n"
+        "def test_value(client):\n    expect_ok(client.value)\n",
+    )
+    config = Config(root=tmp_path, tests=TestsConfig(globs=["tests/**/test_*.py"]))
+    findings, _ = check_test_assertions(config)
+    assert findings == []
+
+
+def test_test_assertions_follows_a_chain_of_helpers(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "tests/test_chain.py",
+        "def _inner(v):\n    assert v == 'ok'\n\n"
+        "def _outer(v):\n    _inner(v)\n\n"
+        "def test_value(client):\n    _outer(client.value)\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert findings == []
+
+
+def test_test_assertions_terminates_on_mutually_recursive_helpers(tmp_path, write_file):
+    # Neither helper asserts, so the test is still a finding; the point is the
+    # walk returns instead of recursing forever.
+    write_file(
+        tmp_path,
+        "tests/test_loop.py",
+        "def _ping(v):\n    _pong(v)\n\n"
+        "def _pong(v):\n    _ping(v)\n\n"
+        "def test_value(client):\n    _ping(client.value)\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert [f.message.split("'")[1] for f in findings] == ["test_value"]
+
+
+def test_test_assertions_still_fires_when_the_helper_asserts_nothing(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "tests/test_hollow.py",
+        "def _run(fn):\n    fn()\n\n"
+        "def test_value(client):\n    _run(client.embed)\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert any("test_value" in f.message for f in findings)
+
+
+def test_test_assertions_treats_the_code_under_test_as_no_expectation(tmp_path, write_file):
+    # A call that resolves outside the test set is the system under test, never
+    # an expectation — this is what keeps a bare constructor call a finding.
+    write_file(
+        tmp_path,
+        "tests/test_sut.py",
+        "from mypkg import Client\n\n"
+        "def test_constructs():\n    Client(url='https://example.com')\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert any("test_constructs" in f.message for f in findings)

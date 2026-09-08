@@ -3,6 +3,20 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
+## [0.3.1] - 2026-09-08
+
+### Fixed
+- `test-assertions` no longer reports a test whose expectation lives in a
+  shared helper. It now follows a call into any function elsewhere in the
+  test tree, resolving same-module definitions, imports in every form
+  (relative, absolute, renamed, module-attribute), and `conftest.py`, and
+  recursing through chains of helpers. A call resolving outside the test
+  tree is the code under test and still counts as no expectation, so a bare
+  constructor call or an implicit didn't-raise is reported as before. Over a
+  720-test suite this took the check from ten findings to five: the five
+  cleared all routed through one `pytest.raises` helper, the five kept were
+  each assertion-free in fact, and no new finding appeared.
+
 ## [0.3.0] - 2026-09-06
 
 ### Added
@@ -83,6 +97,7 @@ semantic versioning.
   a GitHub Release is published, behind a reviewer-gated environment.
 - Shiplock as consumer zero: its own `shiplock.toml`, run over the shiplock repo.
 
+[0.3.1]: https://github.com/shehuphd/shiplock/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/shehuphd/shiplock/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/shehuphd/shiplock/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/shehuphd/shiplock/compare/v0.0.1...v0.1.0

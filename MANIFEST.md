@@ -1,6 +1,6 @@
 # Manifest
 
-Last updated: 2026-09-06 13:07:23 UTC
+Last updated: 2026-09-08 16:57:59 UTC
 
 Every current source file, what it does, and what it touches. A map for a
 reader orienting in the codebase, kept current in the same change that adds,
@@ -14,7 +14,7 @@ removes, renames, or repurposes a file.
 | `cli.py` | Command-line entry point. `main()` parses arguments (`check [path] [--json]`, `prompt [audit\|ablation]`, `--version`, bare welcome), falls back to the zero-config default run when no `shiplock.toml` exists, translates argparse errors to sentences with fuzzy suggestions, colors the finding/clean categories on a tty (`NO_COLOR` honored), renders findings to stdout and notices to stderr, owns the exit-code contract (0/1/2). Reads the prompts via `importlib.resources`. |
 | `_compat.py` | Version-guarded imports defined once: `tomllib` (stdlib on 3.11+, the `tomli` backport on 3.10), imported from here by every TOML-parsing module. |
 | `_config.py` | Loads and validates `shiplock.toml` into frozen dataclasses (`Config`, `DocsConfig`, `StyleConfig`, `VersionConfig`, `ArchitectureConfig`, `ManifestConfig`, `CoverageEntry`, `VersionedFile`, `DepsConfig`, `TestsConfig`); `default_config()` builds the zero-config run from detected doc names. Raises `ConfigError` on anything malformed. Reads the filesystem only. |
-| `_checks.py` | The eleven check functions (`docs-exist`, `banned-words`, `internal-refs`, `readme-links`, `version`, `architecture`, `coverage`, `manifest`, `versioned-files`, `deps-declared-once`, `test-assertions`) and `run_checks`. Reads repo files; shells out to `git` for `versioned-files` and the manifest staleness compare; calls `_introspect` for `version` and `coverage`; parses test files with `ast` for `test-assertions`. |
+| `_checks.py` | The eleven check functions (`docs-exist`, `banned-words`, `internal-refs`, `readme-links`, `version`, `architecture`, `coverage`, `manifest`, `versioned-files`, `deps-declared-once`, `test-assertions`) and `run_checks`. Reads repo files; shells out to `git` for `versioned-files` and the manifest staleness compare; calls `_introspect` for `version` and `coverage`; parses the test tree with `ast` for `test-assertions`, resolving helper calls across modules. |
 | `_report.py` | Result types: `Finding` (a disagreement, fails the run), `Notice` (a skip with its reason), `Report` (both, plus `ok`). |
 | `_style.py` | The banned-word list (`BANNED_WORDS`) and the word-boundary, case-insensitive matcher (`find_banned`, `effective_words`). Excluded from shiplock's own sweep since it must name the words. |
 | `_introspect.py` | `introspect()`: runs a subprocess that binds `sys.path` to the checked root, imports the target package there, confirms it resolved under root, and returns `__version__`, `__all__`, enum members, or callable parameters as JSON. Captures the child's stdout during imports so a package that prints can't corrupt the result. |
@@ -29,7 +29,7 @@ removes, renames, or repurposes a file.
 | `conftest.py` | Shared fixtures (`write_file`, `temp_module`, `git_repo`) and the per-run artifact writer (sorted CSV under `.test-runs/`). |
 | `test_config.py` | Config loader: malformed inputs raise `ConfigError`; a valid file parses. |
 | `test_style.py` | Banned-word matcher: word-boundary edges first, then hits. |
-| `test_checks.py` | Each check's failing cases, skip cases, and clean case; `manifest` and `versioned-files` against a live temp git repo; `deps-declared-once` name canonicalization and line filtering; `test-assertions` expectation forms and exemptions. |
+| `test_checks.py` | Each check's failing cases, skip cases, and clean case; `manifest` and `versioned-files` against a live temp git repo; `deps-declared-once` name canonicalization and line filtering; `test-assertions` expectation forms, helper resolution across import forms, and exemptions. |
 | `test_introspect.py` | Introspection binds to the checked root: under-root reads, outside-root flagged, import errors as statuses, stdout-printing packages tolerated. |
 | `test_cli.py` | Usage errors as a person would hit them (typos, unknown flags, bad paths, a mistyped prompt kind), the zero-config default run, `--json` shape, color discipline when piped, exit-code contract, welcome, the audit prompt's verdict lines and the ablation prompt's lack of one. |
 | `test_docs.py` | Consumer zero: runs the full gate over this repo and fails on any finding. |
