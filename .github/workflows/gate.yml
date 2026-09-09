@@ -103,8 +103,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install "${{ inputs.shiplock-spec }}"
-          # The repo itself must be importable for the version and coverage checks.
-          python -m pip install .
+          # Only the version and coverage checks import the repo's package.
+          # Ask shiplock whether this repo's config configures either before
+          # installing it, so an app repo (no installable package) that
+          # declares neither isn't forced to be pip-installable just to run
+          # the checks that do apply to it.
+          if [ "$(shiplock needs-import)" = "true" ]; then
+            python -m pip install .
+          fi
       - name: Run shiplock check
         run: shiplock check
 
@@ -127,7 +133,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install "${{ inputs.shiplock-spec }}"
-          python -m pip install .
+          # Same install gate as the check job: only version and coverage
+          # import the repo's package, so an app repo that configures neither
+          # isn't forced to be pip-installable for the audit either.
+          if [ "$(shiplock needs-import)" = "true" ]; then
+            python -m pip install .
+          fi
           # rates prices each attempt's tokens from its own bundled snapshot
           # (offline; no network call), so the cost column works the same way
           # for every provider instead of relying on a CLI's self-reported
@@ -143,6 +154,24 @@ jobs:
           FALLBACK_KEY: ${{ secrets.AUDIT_FALLBACK_API_KEY }}
         run: |
           set -euo pipefail
+          # Adapter registry: one line per provider the gate can run, as
+          # "provider|cli|npm-install-spec". The provider is the prefix on a
+          # provider/key secret; the cli is its agent binary; the spec installs
+          # that binary. This table is the only place the provider set lives:
+          # the provider list in error messages, the runner lookup, and the
+          # installer all read it, so nothing downstream names a vendor or
+          # assumes how many there are. Adding a provider is one line here plus
+          # its invocation block in the audit step's run_attempt.
+          ADAPTERS='anthropic|claude|@anthropic-ai/claude-code
+          openai|codex|@openai/codex'
+          field() {  # $1 provider, $2 column → prints the cell; nonzero if unknown
+            printf '%s\n' "$ADAPTERS" | awk -F'|' -v p="$1" -v c="$2" \
+              '$1 == p { print $c; hit = 1 } END { exit !hit }'
+          }
+          known_providers() {  # the registry's provider column, comma-joined
+            printf '%s\n' "$ADAPTERS" \
+              | awk -F'|' 'NF { n++; s = s (n > 1 ? ", " : "") $1 } END { print s }'
+          }
           # "provider/key" → provider is the text before the first slash,
           # lowercased; the key after it is left untouched (case-sensitive).
           provider_of() {
@@ -151,31 +180,21 @@ jobs:
               *)   printf '' ;;
             esac
           }
-          runner_of() {  # provider → the agent CLI that speaks to it
-            case "$1" in
-              anthropic) echo claude ;;
-              openai)    echo codex ;;
-              *)         printf '' ;;
-            esac
-          }
+          runner_of()   { field "$1" 2; }  # provider → the agent CLI
+          npm_spec_of() { field "$1" 3; }  # provider → its npm install spec
           require() {  # $1 secret name, $2 secret value → prints provider
             provider="$(provider_of "$2")"
             if [ -z "$provider" ]; then
               echo "::error::$1 must be 'provider/key', e.g. anthropic/sk-ant-... or openai/sk-..." >&2
               exit 1
             fi
-            if [ -z "$(runner_of "$provider")" ]; then
-              echo "::error::$1 names provider '$provider'; the gate knows anthropic and openai" >&2
+            if ! runner_of "$provider" >/dev/null; then
+              echo "::error::$1 names provider '$provider'; the gate has adapters for: $(known_providers)" >&2
               exit 1
             fi
             echo "$provider"
           }
-          install_runner() {
-            case "$1" in
-              claude) npm install -g @anthropic-ai/claude-code ;;
-              codex)  npm install -g @openai/codex ;;
-            esac
-          }
+          install_provider() { npm install -g "$(npm_spec_of "$1")"; }
           if [ -z "${PRIMARY_KEY:-}" ]; then
             # No key is a skip, not a failure: the deterministic checks still
             # gate the run, and the warning keeps the skip visible.
@@ -189,21 +208,20 @@ jobs:
           fi
           primary_provider="$(require AUDIT_API_KEY "$PRIMARY_KEY")"
           primary_runner="$(runner_of "$primary_provider")"
-          install_runner "$primary_runner"
+          install_provider "$primary_provider"
           fallback_provider=""
           fallback_runner=""
           if [ -n "${FALLBACK_KEY:-}" ]; then
             fallback_provider="$(require AUDIT_FALLBACK_API_KEY "$FALLBACK_KEY")"
             fallback_runner="$(runner_of "$fallback_provider")"
-            if [ "$fallback_runner" != "$primary_runner" ]; then
-              install_runner "$fallback_runner"
-            fi
-            # A cross-provider fallback can't inherit the primary's model name —
-            # model naming is per provider. Fail here, not mid-failover.
-            if [ "$fallback_provider" != "$primary_provider" ] \
-              && [ -z "${{ inputs.audit-fallback-model }}" ]; then
-              echo "::error::the fallback key's provider ($fallback_provider) differs from the primary's ($primary_provider), so audit-fallback-model must name a model in $fallback_provider's own naming" >&2
-              exit 1
+            if [ "$fallback_provider" != "$primary_provider" ]; then
+              install_provider "$fallback_provider"
+              # A cross-provider fallback can't inherit the primary's model
+              # name: model naming is per provider. Fail here, not mid-failover.
+              if [ -z "${{ inputs.audit-fallback-model }}" ]; then
+                echo "::error::the fallback key's provider ($fallback_provider) differs from the primary's ($primary_provider), so audit-fallback-model must name a model in $fallback_provider's own naming" >&2
+                exit 1
+              fi
             fi
           fi
           {

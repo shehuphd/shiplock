@@ -20,6 +20,7 @@ from shiplock._checks import (
     check_test_assertions,
     check_version,
     check_versioned_files,
+    needs_import,
 )
 from shiplock._config import (
     ArchitectureConfig,
@@ -903,3 +904,29 @@ def test_test_assertions_treats_the_code_under_test_as_no_expectation(tmp_path, 
     )
     findings, _ = check_test_assertions(_tests_config(tmp_path))
     assert any("test_constructs" in f.message for f in findings)
+
+
+# --- needs-import ---------------------------------------------------------
+
+
+def test_needs_import_true_when_version_declares_a_package(tmp_path):
+    config = Config(root=tmp_path, version=VersionConfig(package="mypkg"))
+    assert needs_import(config) is True
+
+
+def test_needs_import_true_when_coverage_is_configured(tmp_path):
+    entry = CoverageEntry(target="mypkg", doc="README.md", kind="exports")
+    config = Config(root=tmp_path, coverage=[entry])
+    assert needs_import(config) is True
+
+
+def test_needs_import_false_for_an_app_repo_configuring_neither(tmp_path):
+    # A repo that runs only file-reading checks (docs, refs, links, manifest)
+    # never needs to be installed, so a CI gate can skip the pip install.
+    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
+    assert needs_import(config) is False
+
+
+def test_needs_import_false_when_version_declares_no_package(tmp_path):
+    config = Config(root=tmp_path, version=VersionConfig())
+    assert needs_import(config) is False

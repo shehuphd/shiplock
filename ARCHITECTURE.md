@@ -20,9 +20,11 @@ configured per repo by one `shiplock.toml`.
   backport pulled in on 3.10 alone.
 - Packaging: setuptools, published to PyPI through trusted publishing (OIDC)
   from a GitHub Actions release workflow.
-- CI: GitHub Actions; the reusable gate (`gate.yml`) drives an agent CLI
-  (Claude Code or Codex) for the semantic audit and prices its usage with
-  [rates](https://pypi.org/project/rates/).
+- CI: GitHub Actions; the reusable gate (`gate.yml`) drives an agent CLI for
+  the semantic audit and prices its usage with
+  [rates](https://pypi.org/project/rates/). The provider is data, read from the
+  `provider/key` secret prefix at run time, never hardcoded; Claude Code and
+  Codex are the two adapters wired today, and the format admits any provider.
 - Tests: pytest with pytest-randomly enforced, plus pyyaml and rates for the
   gate-workflow tests.
 
@@ -40,7 +42,9 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
 #### Technical version
 
 - `cli.main` parses argv through `_build_parser` and dispatches `check` to
-  `cli._cmd_check`.
+  `cli._cmd_check`, `prompt` to `cli._cmd_prompt`, and `needs-import` to
+  `cli._cmd_needs_import` (which prints `_checks.needs_import(config)` as
+  `true`/`false` for the CI gate to read before installing the repo).
 - `_config.load_config` (or `_config.default_config` when no `shiplock.toml`
   exists) parses and validates the config into a frozen `Config`.
 - `_checks.run_checks` iterates the `_CHECKS` tuple; each check returns
@@ -180,7 +184,11 @@ the two prompts (`prompts/audit.md`, `prompts/ablation.md`) as package data.
 CI lives in `.github/workflows/`:
 
 - `gate.yml` — the reusable gate (`on: workflow_call`). Job `check` runs the
-  deterministic checks; job `audit` reads the provider from the `provider/key`
+  deterministic checks; both jobs install the checked-out repo only when
+  `shiplock needs-import` reports `true` (the config names a `version` package
+  or a `coverage` entry, the checks that import it), so an app repo that
+  configures neither runs the gate without being pip-installable. Job `audit`
+  reads the provider from the `provider/key`
   audit secret (prefix case-insensitive, key case-preserved), runs the semantic
   layer through that provider's agent CLI (`anthropic` runs Claude Code,
   `openai` runs Codex), opens an issue on an `AUDIT: FAIL` verdict, fails

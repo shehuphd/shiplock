@@ -204,3 +204,62 @@ def test_prompt_audit_kind_matches_the_default(capsys):
     default = capsys.readouterr().out
     main(["prompt", "audit"])
     assert capsys.readouterr().out == default
+
+
+# --- needs-import: what a CI gate reads before installing the repo ---------
+
+
+def test_needs_import_false_for_an_app_repo(tmp_path, write_file, capsys):
+    # An app repo configures only file-reading checks, so the gate can skip
+    # the pip install: it doesn't have to be an installable package.
+    write_file(tmp_path, "shiplock.toml", '[docs]\npublic = ["README.md"]\n')
+    code = main(["needs-import", str(tmp_path)])
+    assert code == EXIT_OK
+    assert capsys.readouterr().out.strip() == "false"
+
+
+def test_needs_import_true_when_version_is_configured(tmp_path, write_file, capsys):
+    write_file(tmp_path, "shiplock.toml", '[version]\npackage = "mypkg"\n')
+    code = main(["needs-import", str(tmp_path)])
+    assert code == EXIT_OK
+    assert capsys.readouterr().out.strip() == "true"
+
+
+def test_needs_import_true_when_coverage_is_configured(tmp_path, write_file, capsys):
+    write_file(
+        tmp_path,
+        "shiplock.toml",
+        '[[coverage]]\nobject = "mypkg"\ndoc = "README.md"\nkind = "exports"\n',
+    )
+    code = main(["needs-import", str(tmp_path)])
+    assert code == EXIT_OK
+    assert capsys.readouterr().out.strip() == "true"
+
+
+def test_needs_import_defaults_to_false_and_stays_clean_on_a_bad_config(
+    tmp_path, write_file, capsys
+):
+    # The gate must read a usable value even when the config is broken; the
+    # following ``shiplock check`` surfaces the error for real.
+    write_file(tmp_path, "shiplock.toml", "this is = = not toml")
+    code = main(["needs-import", str(tmp_path)])
+    assert code == EXIT_OK
+    out = capsys.readouterr()
+    assert out.out.strip() == "false"
+    assert "shiplock:" in out.err
+
+
+def test_needs_import_false_for_a_missing_path(capsys):
+    code = main(["needs-import", "/no/such/dir"])
+    assert code == EXIT_OK
+    assert capsys.readouterr().out.strip() == "false"
+
+
+def test_needs_import_defaults_to_the_current_directory(
+    tmp_path, write_file, monkeypatch, capsys
+):
+    write_file(tmp_path, "shiplock.toml", '[docs]\npublic = ["README.md"]\n')
+    monkeypatch.chdir(tmp_path)
+    code = main(["needs-import"])
+    assert code == EXIT_OK
+    assert capsys.readouterr().out.strip() == "false"

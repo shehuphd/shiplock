@@ -3,6 +3,24 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
+## [0.4.0] - 2026-09-09
+
+### Added
+- A `needs-import` command: `shiplock needs-import [path]` prints `true` or
+  `false` for whether the repo's config makes any check import the checked
+  package. Only `version` and `coverage` introspect the package; a repo that
+  configures neither prints `false`. It fails safe to `false` (exit 0) on a
+  missing path or a broken config, so a CI step can read a usable value and
+  let the following `shiplock check` surface the error.
+
+### Changed
+- The reusable gate installs the checked-out repo only when
+  `shiplock needs-import` reports `true`. An app repo that configures no
+  `version` or `coverage` check now runs the gate without a `pyproject.toml`
+  or any packaging, where before both jobs' unconditional `pip install .`
+  failed on a repo with nothing to install. Consumers pinned to `@main` pick
+  this up on their next run; no input changes.
+
 ## [0.3.1] - 2026-09-08
 
 ### Fixed
@@ -97,6 +115,7 @@ semantic versioning.
   a GitHub Release is published, behind a reviewer-gated environment.
 - Shiplock as consumer zero: its own `shiplock.toml`, run over the shiplock repo.
 
+[0.4.0]: https://github.com/shehuphd/shiplock/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/shehuphd/shiplock/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/shehuphd/shiplock/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/shehuphd/shiplock/compare/v0.1.0...v0.2.0

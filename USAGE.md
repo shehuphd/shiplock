@@ -307,12 +307,29 @@ The workflow's inputs:
 | `audit-permission-mode` | `"dontAsk"` | The permission mode for the read-only run (`anthropic` keys only). |
 | `audit-effort` | `"high"` | Claude's reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`; `anthropic` keys only). Lower it to cut cost when a blocked release is all you need from a failed audit; raise it to `xhigh` if audits still miss drift your own review would have caught. Effort trades cost for how much the model reasons before answering, not just how much it writes. |
 
+### App repos and other non-packages
+
+Both jobs install your checked-out repo only when its config needs the package
+importable: when `[version]` names a package, or a `[[coverage]]` entry exists.
+Those are the two checks that import the repo; every other check reads files. A
+repo that configures neither (an application, a docs set, a config bundle) is
+never installed, so it needs no `pyproject.toml` or packaging to run the gate.
+The gate asks `shiplock needs-import`, which prints `true` or `false` for the
+repo it's run in, and installs only on `true`.
+
 ### The audit key declares its provider
 
-The audit is provider-agnostic by design: the prompt is plain markdown, the
-tools are read-only, and the verdict contract is one greppable line — so any
-agent CLI that can read files and print text can run it, and the verdict's
-authority comes from the checklist, never from which vendor executed it.
+Shiplock is provider-agnostic by default. Pick your own audit provider: the
+prompt is plain markdown, the tools are read-only, and the verdict contract is
+one greppable line, so any agent CLI that can read files and print text can run
+the audit. The verdict's authority comes from the checklist, never from which
+vendor executed it.
+
+Don't hardcode a provider. A vendor name baked into a consuming repo, a secret,
+or an adapter's calling code is a design defect: it pins work that should stay
+portable to one billing account and one CLI. Treat the provider as data. It's
+the prefix on the key, read at run time and dispatched to the matching adapter,
+so switching or adding a vendor is a config change, never a code rewrite.
 
 The `AUDIT_API_KEY` secret carries both the provider and the key as one string:
 
@@ -323,14 +340,28 @@ provider/key
 For example `anthropic/sk-ant-...` or `openai/sk-...`. The provider part (before
 the first slash) is case-insensitive; the key part (after it) is passed to the
 provider's CLI byte for byte, so its case is preserved. The gate reads the
-prefix, installs and runs that provider's agent CLI — `anthropic` runs Claude
-Code, `openai` runs Codex — and hands it the bare key in the environment
-variable it expects. Supporting a new provider is a change inside the gate, not
-to the shape of anyone's secrets: when another vendor ships a headless agent
-CLI, switching to it means changing the secret's prefix and the model name.
+prefix and runs the matching adapter. Two adapters ship today, `anthropic` (runs
+Claude Code) and `openai` (runs Codex), but the `provider/key` format admits any
+provider: `AUDIT_API_KEY` and `AUDIT_FALLBACK_API_KEY` each map to whichever
+provider their own prefix names. Adding a provider is a change inside the gate's
+adapter, not to the shape of anyone's secrets: when another vendor ships a
+headless agent CLI, wiring it in means teaching the gate that prefix, and a
+consumer then reaches it by changing the prefix and the model name.
 
 Because the provider names the model namespace, `audit-model` has no default:
 declare it in your provider's own naming. The `check` job needs no key.
+
+Pick the cheapest model among reasoning equals. The audit has to end with a
+greppable `AUDIT: PASS` or `AUDIT: FAIL` line, and a run with no verdict line
+fails closed, so the model needs enough reasoning to work the checklist and
+hold the format. Among the models that clear that bar, the cheapest is the
+right pick, and the newest is often among the cheapest: price doesn't track
+release date, so compare current prices rather than assuming the latest model
+costs more. Where a provider exposes a reasoning-effort dial (see `audit-effort`
+for Claude), raise the effort for a more thorough audit before reaching for a
+larger, pricier model. Avoid a bottom-tier model that runs but drops or
+malforms the verdict line, since that turns a small saving into spurious gate
+failures.
 
 Add the key to the consuming repo at
 `https://github.com/<owner>/<repo>/settings/secrets/actions` → **New repository

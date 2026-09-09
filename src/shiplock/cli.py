@@ -23,7 +23,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from shiplock import __version__
-from shiplock._checks import run_checks
+from shiplock._checks import needs_import, run_checks
 from shiplock._config import CONFIG_FILENAME, ConfigError, default_config, load_config
 from shiplock._report import Report
 
@@ -32,7 +32,7 @@ EXIT_FINDINGS = 1
 EXIT_USAGE = 2
 
 _DESCRIPTION = "Docs-vs-code release checks: deterministic, plus semantic and ablation audit prompts."
-_COMMANDS = ("check", "prompt")
+_COMMANDS = ("check", "prompt", "needs-import")
 _PROMPT_KINDS = ("audit", "ablation")
 
 _RED = "\033[31m"
@@ -94,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "check":
         return _cmd_check(Path(args.path), as_json=args.json)
+    if args.command == "needs-import":
+        return _cmd_needs_import(Path(args.path))
     return _cmd_prompt(args.kind)
 
 
@@ -138,6 +140,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="which prompt: the gating docs-vs-code audit (default) or the "
         "advisory ablation audit",
     )
+
+    needs = sub.add_parser(
+        "needs-import",
+        help="print whether this repo's config needs the package importable",
+        allow_abbrev=False,
+    )
+    needs.add_argument(
+        "path",
+        nargs="?",
+        default=".",
+        help="repo to inspect (default: the current directory)",
+    )
     return parser
 
 
@@ -171,6 +185,37 @@ def _cmd_check(root: Path, as_json: bool = False) -> int:
             )
         _render(report)
     return EXIT_FINDINGS if not report.ok else EXIT_OK
+
+
+def _cmd_needs_import(root: Path) -> int:
+    """Print ``true`` or ``false``: does this repo's config need the package?
+
+    A CI gate reads this to decide whether to install the checked repo before
+    running ``shiplock check``. Only the version and coverage checks import it,
+    so an app repo that configures neither needn't be installable. On a config
+    error, the message goes to stderr and the value prints ``false`` (the gate
+    skips the install, and the following ``shiplock check`` surfaces the same
+    error properly); exit stays 0 so the gate reads a clean value.
+    """
+    if not root.is_dir():
+        print(
+            f"shiplock: '{root}' isn't a directory it can inspect. Point it at "
+            f"a repo root, or run it from inside one.",
+            file=sys.stderr,
+        )
+        print("false")
+        return EXIT_OK
+
+    defaulted = not (root / CONFIG_FILENAME).is_file()
+    try:
+        config = default_config(root) if defaulted else load_config(root)
+    except ConfigError as exc:
+        print(f"shiplock: {exc}", file=sys.stderr)
+        print("false")
+        return EXIT_OK
+
+    print("true" if needs_import(config) else "false")
+    return EXIT_OK
 
 
 def _to_json(report: Report) -> dict:
@@ -234,6 +279,7 @@ def _print_welcome() -> None:
     print("  shiplock check                check the current directory")
     print("  shiplock prompt               print the semantic audit prompt")
     print("  shiplock prompt ablation      print the advisory ablation prompt")
+    print("  shiplock needs-import         does this repo's config need it installed?")
     print()
     print("Docs: https://github.com/shehuphd/shiplock")
 

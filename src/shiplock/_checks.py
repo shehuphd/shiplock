@@ -1029,6 +1029,18 @@ _CHECKS = (
 )
 
 
+def needs_import(config: Config) -> bool:
+    """Whether any configured check has to import the checked repo's package.
+
+    Only ``version`` and ``coverage`` introspect the package; every other
+    check reads files. A repo that configures neither never needs to be
+    importable, so a CI gate can skip installing it. That's what lets an app
+    repo (no installable package) run the checks that do apply to it.
+    """
+    version_configured = config.version is not None and config.version.package is not None
+    return version_configured or bool(config.coverage)
+
+
 def run_checks(config: Config):
     """Run every check over ``config`` and return the combined report."""
     from shiplock._report import Report

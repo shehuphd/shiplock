@@ -42,6 +42,21 @@ def _step_scripts() -> dict[str, str]:
     }
 
 
+def _registry_providers() -> list[str]:
+    """The provider column of the gate's adapter registry (the ADAPTERS table).
+
+    Parsed from the runners step so a test can assert against whatever set the
+    registry carries, without restating it (and its count) in the test.
+    """
+    block = re.search(r"ADAPTERS='(.*?)'", _step_scripts()[STEP_RUNNERS], re.DOTALL)
+    assert block, "no ADAPTERS registry found in the runners step"
+    return [
+        line.strip().split("|", 1)[0]
+        for line in block.group(1).splitlines()
+        if line.strip()
+    ]
+
+
 def _substitute(
     script: str, *, model: str, fb_model: str, effort: str, outputs: dict[str, str]
 ) -> str:
@@ -182,7 +197,11 @@ def test_unknown_provider_is_rejected_naming_the_known_ones(gate):
     result = gate(STEP_RUNNERS, primary="deepseek/aX-123ab")
     assert result.returncode != 0
     assert "provider 'deepseek'" in result.stderr
-    assert "anthropic and openai" in result.stderr
+    # The error lists whatever providers the adapter registry carries, derived
+    # from the table rather than a hardcoded pair, so a new adapter appears in
+    # the message for free and nothing here assumes a fixed count.
+    for provider in _registry_providers():
+        assert provider in result.stderr
 
 
 def test_missing_model_is_rejected(gate):
@@ -288,3 +307,30 @@ def test_rates_prices_each_provider_from_its_own_usage(gate):
     # n/a" — proving rates actually priced it rather than degrading silently.
     summary = gate.summary_file.read_text()
     assert "| 2 (continued, openai) | 50 | 900 | 40000 | n/a | 0.0196 |" in summary
+
+
+# --- install gating: an app repo must not be forced to be installable ------
+
+
+def _install_step(job: str) -> str:
+    doc = yaml.safe_load(GATE.read_text())
+    for step in doc["jobs"][job]["steps"]:
+        run = step.get("run", "")
+        if "pip install" in run and "pip install ." in run:
+            return run
+    raise AssertionError(f"no install step found in the {job!r} job")
+
+
+@pytest.mark.parametrize("job", ["check", "audit"])
+def test_repo_install_is_gated_on_needs_import(job):
+    # Reintroducing an unconditional ``pip install .`` would break every app
+    # repo (no installable package) that runs the gate, so both jobs must ask
+    # ``shiplock needs-import`` before installing the checked-out repo.
+    run = _install_step(job)
+    assert 'shiplock needs-import' in run
+    guarded = re.search(
+        r'if \[ "\$\(shiplock needs-import\)" = "true" \]; then\s*'
+        r'\n\s*python -m pip install \.\s*\n\s*fi',
+        run,
+    )
+    assert guarded, f"{job} install step doesn't gate 'pip install .' on needs-import"
