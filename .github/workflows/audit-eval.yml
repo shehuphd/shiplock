@@ -1,0 +1,43 @@
+name: audit adapter eval
+
+# Dispatch-only harness to exercise one audit adapter end to end against this
+# repo, kept apart from release-gate.yml so shiplock's own anthropic/openai
+# audit config is never disturbed. Store the provider's key as a repo secret in
+# the provider/key format (e.g. GEMINI_AUDIT_KEY = "google/<key>") and dispatch
+# with a model in that provider's own naming.
+
+on:
+  workflow_dispatch:
+    inputs:
+      audit-model:
+        description: >-
+          The audit model in the provider's own naming, matching the secret's
+          provider prefix (e.g. gemini-2.5-pro for a google/ key).
+        type: string
+        default: "gemini-2.5-pro"
+      audit-effort:
+        description: >-
+          Reasoning effort for the run (anthropic keys only; ignored by other
+          providers). Empty leaves the CLI default.
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  eval:
+    uses: ./.github/workflows/gate.yml
+    with:
+      shiplock-spec: "."   # audit this repo's own tree
+      run-audit: true
+      audit-model: ${{ inputs.audit-model }}
+      audit-effort: ${{ inputs.audit-effort }}
+    secrets:
+      # The eval provider's key, stored in provider/key form (e.g.
+      # "google/<key>"). It maps to the gate's primary slot so the named
+      # provider's adapter runs as the first attempt, not only as a failover.
+      # The gate reads the prefix and runs the matching adapter, so this one
+      # secret evals whichever provider its value names.
+      AUDIT_API_KEY: ${{ secrets.AUDIT_FALLBACK_API_KEY_2 }}
