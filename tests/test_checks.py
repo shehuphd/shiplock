@@ -716,6 +716,32 @@ def test_test_assertions_accepts_pytest_raises(tmp_path, write_file):
     assert findings == []
 
 
+def test_test_assertions_accepts_pytest_warns(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "tests/test_demo.py",
+        "import pytest\n\n"
+        "def test_warns():\n"
+        "    with pytest.warns(UserWarning):\n"
+        "        warn_now()\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert findings == []
+
+
+def test_test_assertions_accepts_pytest_deprecated_call(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "tests/test_demo.py",
+        "import pytest\n\n"
+        "def test_deprecation():\n"
+        "    with pytest.deprecated_call():\n"
+        "        call_old_api()\n",
+    )
+    findings, _ = check_test_assertions(_tests_config(tmp_path))
+    assert findings == []
+
+
 def test_test_assertions_accepts_assert_calls(tmp_path, write_file):
     write_file(
         tmp_path,

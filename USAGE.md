@@ -42,6 +42,19 @@ Print the semantic audit prompt for a fresh agent:
 shiplock prompt
 ```
 
+One more command, meant for CI rather than day-to-day use:
+
+```bash
+shiplock needs-import path/to/repo
+```
+
+It prints `true` or `false` for whether the repo's config makes any check
+import the package (only `version` and `coverage` do). The path defaults to the
+current directory. The gate reads it to decide whether to install the repo
+before checking it; see [Use it in CI](#use-it-in-ci). It exits 0 either way,
+and prints `false` on a missing path or a broken config so a CI step reads a
+usable value rather than an error.
+
 `shiplock --version` prints the installed version, and `shiplock` alone prints a
 short welcome with these commands.
 
@@ -173,7 +186,7 @@ Eleven deterministic checks, run in this order:
 | `manifest` | The per-file manifest exists, carries a `Last updated:` line, lists every source file matched by its globs (by path or file name), and changed whenever the sources changed since the last git tag. With no `[manifest]` declared, the check prints a reminder notice instead — see below. |
 | `versioned-files` | A declared data file whose content differs from the last reachable git tag has moved its version marker. |
 | `deps-declared-once` | No package is declared in both `pyproject.toml` (dependencies and optional groups) and a requirements file matched by `[deps].requirements`. Names compare in canonical form, so `Foo_Bar` and `foo-bar` are one package; comment, option, and URL lines are ignored. |
-| `test-assertions` | Every test function in the files matched by `[tests].globs` (module-level `test_*`, and `test_*` methods of `Test*` classes) contains an expectation: an `assert`, a `raises`/`warns` context, or a call whose name starts with `assert`. A shared helper counts for the tests that call it: any call resolving to a function elsewhere in the test tree is followed, through same-module definitions, imports in any form, and `conftest.py`. A call resolving outside that tree is the code under test, so it's never an expectation. A test that only relies on code not raising should assert the side effect it exists to pin, or be exempted by name. |
+| `test-assertions` | Every test function in the files matched by `[tests].globs` (module-level `test_*`, and `test_*` methods of `Test*` classes) contains an expectation: an `assert`, a `raises`/`warns`/`deprecated_call` context, or a call whose name starts with `assert`. A shared helper counts for the tests that call it: any call resolving to a function elsewhere in the test tree is followed, through same-module definitions, imports in any form, and `conftest.py`. A call resolving outside that tree is the code under test, so it's never an expectation. A test that only relies on code not raising should assert the side effect it exists to pin, or be exempted by name. |
 
 ### The manifest reminder
 

@@ -1,6 +1,6 @@
 # Manifest
 
-Last updated: 2026-09-09 20:03:22 UTC
+Last updated: 2026-09-09 21:01:30 UTC
 
 Every current source file, what it does, and what it touches. A map for a
 reader orienting in the codebase, kept current in the same change that adds,

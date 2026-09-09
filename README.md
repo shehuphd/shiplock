@@ -113,6 +113,11 @@ jobs:
     uses: shehuphd/shiplock/.github/workflows/gate.yml@main
 ```
 
+The gate installs the checked-out repo only when its config uses a check that
+imports the package (version or coverage), which it decides by running
+`shiplock needs-import`. An app repo that configures neither runs the gate
+without being an installable package.
+
 The full wiring — inputs, the audit's API key, the dormant-first rollout — is in
 [USAGE.md](https://github.com/shehuphd/shiplock/blob/main/USAGE.md).
 

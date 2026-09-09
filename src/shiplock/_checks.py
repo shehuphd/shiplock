@@ -754,10 +754,10 @@ def _requirement_name(line: str) -> str | None:
     return _canonical_dep(match.group(0))
 
 
-# Call names that count as an expectation inside a test body. ``raises`` and
-# ``warns`` cover pytest.raises/warns used as context managers or calls;
-# anything starting with ``assert`` covers unittest's self.assert* and mock's
-# assert_called* family.
+# Call names that count as an expectation inside a test body. ``raises``,
+# ``warns``, and ``deprecated_call`` cover pytest.raises/warns/deprecated_call
+# used as context managers or calls; anything starting with ``assert`` covers
+# unittest's self.assert* and mock's assert_called* family.
 _EXPECTATION_CALLS = {"raises", "warns", "deprecated_call"}
 
 
