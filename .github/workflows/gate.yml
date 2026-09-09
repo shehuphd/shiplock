@@ -163,7 +163,8 @@ jobs:
           # assumes how many there are. Adding a provider is one line here plus
           # its invocation block in the audit step's run_attempt.
           ADAPTERS='anthropic|claude|@anthropic-ai/claude-code
-          openai|codex|@openai/codex'
+          openai|codex|@openai/codex
+          google|gemini|@google/gemini-cli'
           field() {  # $1 provider, $2 column → prints the cell; nonzero if unknown
             printf '%s\n' "$ADAPTERS" | awk -F'|' -v p="$1" -v c="$2" \
               '$1 == p { print $c; hit = 1 } END { exit !hit }'
@@ -311,6 +312,51 @@ jobs:
               "cache_read_input_tokens": usage.get("cached_input_tokens"),
           }
           envelope = {"result": result,
+                      "usage": {k: v for k, v in mapped.items() if v is not None}}
+          print(json.dumps(envelope))' "$5" > "$5"
+                ;;
+              gemini)
+                # Gemini CLI's built-in toolset includes shell and file writes,
+                # so a read-only run needs the tools.core allowlist, which drops
+                # every built-in not named (there is no CLI flag for it, and
+                # --allowed-tools only bypasses the confirmation dialog). A
+                # workspace .gemini/settings.json takes precedence over the
+                # checked-out repo's own, so the audit can't be widened by the
+                # repo it inspects. --approval-mode yolo clears the headless
+                # approval prompt; with shell and write absent there is nothing
+                # else it could approve. Gemini can't scope a write to one path
+                # the way claude's Write(audit-progress.md) does, so it gets no
+                # write tool at all: a gemini primary that dies restarts on the
+                # fallback rather than continuing from a log it couldn't write.
+                mkdir -p .gemini
+                cat > .gemini/settings.json <<'JSON'
+          {"tools": {"core": ["read_file", "read_many_files", "list_directory", "glob", "grep_search"]}}
+          JSON
+                # --output-format json returns one object: response plus a stats
+                # block whose per-model token counts price the run. prompt is
+                # input, candidates + thoughts is output (reasoning included),
+                # cached is cache-read; Gemini reports no cache-write.
+                GEMINI_API_KEY="$3" gemini \
+                  --model "$2" \
+                  --approval-mode yolo \
+                  --output-format json \
+                  -p "$(cat "$4")" > "$5.raw"
+                python3 -c '
+          import json, sys, pathlib
+          raw = pathlib.Path(sys.argv[1] + ".raw").read_text()
+          data = json.loads(raw) if raw.strip() else {}
+          totals = {"prompt": 0, "candidates": 0, "cached": 0, "thoughts": 0}
+          for model in ((data.get("stats") or {}).get("models") or {}).values():
+              tokens = model.get("tokens") or {}
+              for key in totals:
+                  totals[key] += tokens.get(key) or 0
+          output = totals["candidates"] + totals["thoughts"]
+          mapped = {
+              "input_tokens": totals["prompt"] or None,
+              "output_tokens": output or None,
+              "cache_read_input_tokens": totals["cached"] or None,
+          }
+          envelope = {"result": data.get("response", ""),
                       "usage": {k: v for k, v in mapped.items() if v is not None}}
           print(json.dumps(envelope))' "$5" > "$5"
                 ;;

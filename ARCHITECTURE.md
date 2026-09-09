@@ -23,8 +23,9 @@ configured per repo by one `shiplock.toml`.
 - CI: GitHub Actions; the reusable gate (`gate.yml`) drives an agent CLI for
   the semantic audit and prices its usage with
   [rates](https://pypi.org/project/rates/). The provider is data, read from the
-  `provider/key` secret prefix at run time, never hardcoded; Claude Code and
-  Codex are the two adapters wired today, and the format admits any provider.
+  `provider/key` secret prefix at run time, never hardcoded; Claude Code,
+  Codex, and Gemini CLI are the three adapters wired today, and the format
+  admits any provider.
 - Tests: pytest with pytest-randomly enforced, plus pyyaml and rates for the
   gate-workflow tests.
 
@@ -191,7 +192,8 @@ CI lives in `.github/workflows/`:
   reads the provider from the `provider/key`
   audit secret (prefix case-insensitive, key case-preserved), runs the semantic
   layer through that provider's agent CLI (`anthropic` runs Claude Code,
-  `openai` runs Codex), opens an issue on an `AUDIT: FAIL` verdict, fails
+  `openai` runs Codex, `google` runs Gemini CLI), opens an issue on an
+  `AUDIT: FAIL` verdict, fails
   closed when no verdict line is present, and writes each attempt's token
   usage and a [rates](https://pypi.org/project/rates/)-priced USD cost to the
   job summary (and the issue footer). With a fallback key from a

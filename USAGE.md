@@ -353,13 +353,21 @@ provider/key
 For example `anthropic/sk-ant-...` or `openai/sk-...`. The provider part (before
 the first slash) is case-insensitive; the key part (after it) is passed to the
 provider's CLI byte for byte, so its case is preserved. The gate reads the
-prefix and runs the matching adapter. Two adapters ship today, `anthropic` (runs
-Claude Code) and `openai` (runs Codex), but the `provider/key` format admits any
-provider: `AUDIT_API_KEY` and `AUDIT_FALLBACK_API_KEY` each map to whichever
-provider their own prefix names. Adding a provider is a change inside the gate's
-adapter, not to the shape of anyone's secrets: when another vendor ships a
-headless agent CLI, wiring it in means teaching the gate that prefix, and a
-consumer then reaches it by changing the prefix and the model name.
+prefix and runs the matching adapter. Three adapters ship today, `anthropic`
+(runs Claude Code), `openai` (runs Codex), and `google` (runs Gemini CLI), but
+the `provider/key` format admits any provider: `AUDIT_API_KEY` and
+`AUDIT_FALLBACK_API_KEY` each map to whichever provider their own prefix names.
+Adding a provider is a change inside the gate's adapter, not to the shape of
+anyone's secrets: when another vendor ships a headless agent CLI, wiring it in
+means teaching the gate that prefix, and a consumer then reaches it by changing
+the prefix and the model name.
+
+Every adapter runs the audit read-only: the tools it exposes to the agent are
+scoped to reading files (for Gemini CLI, whose built-in toolset otherwise
+includes shell and file writes, the gate restricts it to read-only tools for
+the run). One consequence for Gemini: it isn't given a scoped write tool, so a
+Gemini primary that dies mid-run restarts on the fallback rather than continuing
+from a progress log, where Claude and Codex continue.
 
 Because the provider names the model namespace, `audit-model` has no default:
 declare it in your provider's own naming. The `check` job needs no key.

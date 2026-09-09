@@ -3,6 +3,20 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
+## [0.5.0] - 2026-09-09
+
+### Added
+- A third audit adapter, `google` (runs Google's Gemini CLI), alongside
+  `anthropic` and `openai`. An `AUDIT_API_KEY` or `AUDIT_FALLBACK_API_KEY` of
+  the form `google/<key>` now resolves to Gemini CLI, installed and driven by
+  the gate. The gate restricts Gemini's built-in toolset to read-only tools for
+  the run (its default set includes shell and file writes), and maps its
+  `--output-format json` token stats to the shared usage keys so `rates` prices
+  the run like the others. Gemini isn't given a scoped write tool, so a Gemini
+  primary that dies mid-run restarts on the fallback rather than continuing from
+  a progress log. Adding it was one registry row plus its invocation block, the
+  extension point 0.4.0's adapter registry opened; no consumer input changes.
+
 ## [0.4.0] - 2026-09-09
 
 ### Added
@@ -115,6 +129,7 @@ semantic versioning.
   a GitHub Release is published, behind a reviewer-gated environment.
 - Shiplock as consumer zero: its own `shiplock.toml`, run over the shiplock repo.
 
+[0.5.0]: https://github.com/shehuphd/shiplock/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/shehuphd/shiplock/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/shehuphd/shiplock/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/shehuphd/shiplock/compare/v0.2.0...v0.3.0

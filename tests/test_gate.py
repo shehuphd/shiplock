@@ -8,6 +8,7 @@ with stub `claude`/`codex`/`npm` binaries on PATH. Failing cases first.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -127,6 +128,19 @@ def gate(tmp_path, monkeypatch):
         'printf "Continued from the log.\\nAUDIT: PASS\\n" > "$last"\n'
         "echo '{\"type\":\"turn.completed\",\"usage\":"
         "{\"input_tokens\":50,\"output_tokens\":900,\"cached_input_tokens\":40000}}'\n",
+    )
+    # The gemini stub asserts its key arrived, records argv, then prints one
+    # JSON object the way `gemini --output-format json` does: a response with a
+    # PASS verdict and a stats block whose per-model token counts the adapter
+    # maps to input/output/cache.
+    _write_stub(
+        bin_dir,
+        "gemini",
+        f'[ "$GEMINI_API_KEY" = "{PRIMARY_BARE_KEY}" ] || {{ echo "wrong key" >&2; exit 99; }}\n'
+        'printf "%s\\n" "$@" > gemini-argv.txt\n'
+        "echo '{\"response\":\"read the docs\\nAUDIT: PASS\","
+        "\"stats\":{\"models\":{\"gemini-2.5-pro\":{\"tokens\":"
+        "{\"prompt\":40,\"candidates\":900,\"cached\":40000,\"thoughts\":120,\"total\":41060}}}}}'\n",
     )
 
     scripts = _step_scripts()
@@ -307,6 +321,41 @@ def test_rates_prices_each_provider_from_its_own_usage(gate):
     # n/a" — proving rates actually priced it rather than degrading silently.
     summary = gate.summary_file.read_text()
     assert "| 2 (continued, openai) | 50 | 900 | 40000 | n/a | 0.0196 |" in summary
+
+
+def test_google_provider_installs_the_gemini_runner(gate):
+    # google is the third adapter: its provider/key resolves to the gemini CLI.
+    result = gate(STEP_RUNNERS, primary=f"google/{PRIMARY_BARE_KEY}", model="gemini-2.5-pro")
+    assert result.returncode == 0, result.stderr
+    outputs = gate.output_file.read_text()
+    assert "primary-runner=gemini" in outputs
+    assert "install -g @google/gemini-cli" in result.stderr  # via the npm stub
+
+
+def test_gemini_runs_read_only_and_maps_its_usage(gate):
+    primary = f"google/{PRIMARY_BARE_KEY}"
+    setup = gate(STEP_RUNNERS, primary=primary, model="gemini-2.5-pro")
+    assert setup.returncode == 0, setup.stderr
+    audit = gate(STEP_AUDIT, primary=primary, model="gemini-2.5-pro")
+    assert audit.returncode == 0, audit.stderr
+
+    # The stats block's per-model tokens map to the canonical usage keys:
+    # prompt -> input, candidates + thoughts -> output, cached -> cache read.
+    envelope = json.loads((gate.work / "audit.json").read_text())
+    assert "AUDIT: PASS" in envelope["result"]
+    assert envelope["usage"] == {
+        "input_tokens": 40,
+        "output_tokens": 1020,
+        "cache_read_input_tokens": 40000,
+    }
+
+    # The read-only guarantee: the run's own settings restrict the built-in
+    # toolset to read tools, so the audit can't write or shell out even though
+    # gemini ships those tools by default.
+    settings = (gate.work / ".gemini" / "settings.json").read_text()
+    assert "read_file" in settings and "grep_search" in settings
+    assert "write_file" not in settings
+    assert "run_shell_command" not in settings
 
 
 # --- install gating: an app repo must not be forced to be installable ------
