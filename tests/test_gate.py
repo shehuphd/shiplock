@@ -332,6 +332,14 @@ def test_google_provider_installs_the_gemini_runner(gate):
     assert "install -g @google/gemini-cli" in result.stderr  # via the npm stub
 
 
+def test_gemini_marks_the_workspace_trusted():
+    # Gemini refuses to run in an untrusted checkout, overriding the approval
+    # mode back to a prompt it can't answer headless and exiting before any API
+    # call. The adapter must mark the workspace trusted so the run proceeds.
+    script = _step_scripts()[STEP_AUDIT]
+    assert "GEMINI_CLI_TRUST_WORKSPACE=true" in script
+
+
 def test_gemini_runs_read_only_and_maps_its_usage(gate):
     primary = f"google/{PRIMARY_BARE_KEY}"
     setup = gate(STEP_RUNNERS, primary=primary, model="gemini-2.5-pro")

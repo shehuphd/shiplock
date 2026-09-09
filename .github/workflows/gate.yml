@@ -322,11 +322,15 @@ jobs:
                 # --allowed-tools only bypasses the confirmation dialog). A
                 # workspace .gemini/settings.json takes precedence over the
                 # checked-out repo's own, so the audit can't be widened by the
-                # repo it inspects. --approval-mode yolo clears the headless
-                # approval prompt; with shell and write absent there is nothing
-                # else it could approve. Gemini can't scope a write to one path
-                # the way claude's Write(audit-progress.md) does, so it gets no
-                # write tool at all: a gemini primary that dies restarts on the
+                # repo it inspects. GEMINI_CLI_TRUST_WORKSPACE=true is required
+                # in an untrusted checkout: without it Gemini treats the folder
+                # as untrusted, overrides the approval mode back to a prompt it
+                # can't answer headless, and exits before any API call.
+                # --approval-mode yolo then clears the headless approval prompt;
+                # with shell and write absent there is nothing else it could
+                # approve. Gemini can't scope a write to one path the way
+                # claude's Write(audit-progress.md) does, so it gets no write
+                # tool at all: a gemini primary that dies restarts on the
                 # fallback rather than continuing from a log it couldn't write.
                 mkdir -p .gemini
                 cat > .gemini/settings.json <<'JSON'
@@ -336,11 +340,14 @@ jobs:
                 # block whose per-model token counts price the run. prompt is
                 # input, candidates + thoughts is output (reasoning included),
                 # cached is cache-read; Gemini reports no cache-write.
-                GEMINI_API_KEY="$3" gemini \
+                # Capture Gemini's own exit so a failure fails over instead of
+                # being masked by the mapper below, which always exits clean.
+                gemini_rc=0
+                GEMINI_CLI_TRUST_WORKSPACE=true GEMINI_API_KEY="$3" gemini \
                   --model "$2" \
                   --approval-mode yolo \
                   --output-format json \
-                  -p "$(cat "$4")" > "$5.raw"
+                  -p "$(cat "$4")" > "$5.raw" || gemini_rc=$?
                 python3 -c '
           import json, sys, pathlib
           raw = pathlib.Path(sys.argv[1] + ".raw").read_text()
@@ -359,6 +366,7 @@ jobs:
           envelope = {"result": data.get("response", ""),
                       "usage": {k: v for k, v in mapped.items() if v is not None}}
           print(json.dumps(envelope))' "$5" > "$5"
+                return "$gemini_rc"
                 ;;
               *) echo "::error::unknown audit runner '$1'" >&2; return 64 ;;
             esac
