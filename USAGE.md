@@ -318,7 +318,7 @@ The workflow's inputs:
 | `audit-model` | `""` | The audit's model, in the key's provider's own naming. Required when `run-audit` is true. |
 | `audit-fallback-model` | `""` | The fallback attempt's model, in the fallback key's provider's naming. Empty reuses `audit-model` when both keys name the same provider; a cross-provider fallback must declare its own. |
 | `audit-permission-mode` | `"dontAsk"` | The permission mode for the read-only run (`anthropic` keys only). |
-| `audit-effort` | `"high"` | Reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`). An `anthropic` key maps it to Claude Code's `--effort`; a `google` key maps it to Gemini's `thinkingLevel` (`low`, `medium`, `high`, with `xhigh`/`max` clamped; `medium` is gemini-3.1-pro only, and Gemini 3 defaults to high). `openai`/Codex has no equivalent and ignores it. Lower it to cut cost when a blocked release is all you need from a failed audit; raise it if audits miss drift your own review would have caught. |
+| `audit-effort` | `"high"` | Reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`). An `anthropic` key maps it to Claude Code's `--effort`; a `google` key maps it to Gemini's `thinkingLevel` (`low`, `medium`, `high`, with `xhigh`/`max` clamped; `medium` is gemini-3.1-pro only, and Gemini 3 defaults to high). An `openai` key maps it to Codex's `model_reasoning_effort`. Lower it to cut cost when a blocked release is all you need from a failed audit; raise it if audits miss drift your own review would have caught. |
 
 ### App repos and other non-packages
 
@@ -378,8 +378,8 @@ fails closed, so the model needs enough reasoning to work the checklist and
 hold the format. Among the models that clear that bar, the cheapest is the
 right pick, and the newest is often among the cheapest: price doesn't track
 release date, so compare current prices rather than assuming the latest model
-costs more. Where a provider exposes a reasoning-effort dial (see `audit-effort`
-for Claude), raise the effort for a more thorough audit before reaching for a
+costs more. Where a provider exposes a reasoning-effort dial (see `audit-effort`,
+which reaches all three adapters), raise the effort for a more thorough audit before reaching for a
 larger, pricier model. Avoid a bottom-tier model that runs but drops or
 malforms the verdict line, since that turns a small saving into spurious gate
 failures.

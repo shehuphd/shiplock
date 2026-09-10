@@ -117,6 +117,7 @@ def gate(tmp_path, monkeypatch):
         bin_dir,
         "codex",
         f'[ "$CODEX_API_KEY" = "{FALLBACK_BARE_KEY}" ] || {{ echo "wrong key" >&2; exit 99; }}\n'
+        'printf "%s\\n" "$@" > codex-argv.txt\n'
         'last=""\n'
         'args=("$@")\n'
         'for ((i = 0; i < ${#args[@]}; i++)); do\n'
@@ -199,6 +200,28 @@ def test_audit_effort_omitted_leaves_the_cli_default(gate):
     gate(STEP_AUDIT, primary=primary)
     argv = (gate.work / "claude-argv.txt").read_text().splitlines()
     assert "--effort" not in argv
+
+
+def test_audit_effort_reaches_codex_as_a_reasoning_effort_override(gate):
+    # For an openai key, audit-effort becomes codex's model_reasoning_effort
+    # config override. The failover path drives codex here (claude primary dies,
+    # codex fallback continues), and the effort applies to every attempt.
+    primary = f"anthropic/{PRIMARY_BARE_KEY}"
+    fallback = f"openai/{FALLBACK_BARE_KEY}"
+    gate(STEP_RUNNERS, primary=primary, fallback=fallback, fb_model="gpt-test")
+    gate(STEP_AUDIT, primary=primary, fallback=fallback, fb_model="gpt-test", effort="high")
+    argv = (gate.work / "codex-argv.txt").read_text().splitlines()
+    assert "-c" in argv
+    assert argv[argv.index("-c") + 1] == "model_reasoning_effort=high"
+
+
+def test_audit_effort_omitted_leaves_codex_default(gate):
+    primary = f"anthropic/{PRIMARY_BARE_KEY}"
+    fallback = f"openai/{FALLBACK_BARE_KEY}"
+    gate(STEP_RUNNERS, primary=primary, fallback=fallback, fb_model="gpt-test")
+    gate(STEP_AUDIT, primary=primary, fallback=fallback, fb_model="gpt-test")
+    argv = (gate.work / "codex-argv.txt").read_text().splitlines()
+    assert not any(a.startswith("model_reasoning_effort=") for a in argv)
 
 
 def test_bare_key_without_provider_prefix_is_rejected(gate):

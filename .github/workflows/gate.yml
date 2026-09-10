@@ -60,8 +60,8 @@ on:
           max. Defaults to high. An anthropic key maps it to Claude Code's
           --effort; a google key maps it to Gemini's thinkingLevel (low,
           medium, high, with xhigh and max clamped to high; medium is
-          gemini-3.1-pro only, and Gemini 3 already defaults to high). Codex
-          has no equivalent, so it's ignored for openai keys. Lower it to cut
+          gemini-3.1-pro only, and Gemini 3 already defaults to high). An
+          openai key maps it to codex's model_reasoning_effort override. Lower it to cut
           cost when a blocked release is all you need from a failed audit;
           raise it if audits miss drift your repo's own review would have
           caught. Effort trades cost for how much the model reasons before it
@@ -291,18 +291,35 @@ jobs:
                 # help text names as the intended use of this bypass. --json
                 # streams events whose turn.completed line carries token
                 # usage; the final message goes to its own file.
+                # audit-effort maps to codex's model_reasoning_effort config
+                # override; empty leaves codex's own default. codex parses a -c
+                # value as JSON and falls back to a bare string, so a level it
+                # doesn't recognize reaches it as a string to resolve rather
+                # than failing the parse.
+                effort_conf=""
+                if [ -n "${{ inputs.audit-effort }}" ]; then
+                  effort_conf="-c model_reasoning_effort=${{ inputs.audit-effort }}"
+                fi
+                # Capture codex's own exit so a failure fails over instead of
+                # being masked by the mapper below, which always exits clean
+                # (the gemini branch captures its rc the same way).
+                codex_rc=0
                 CODEX_API_KEY="$3" OPENAI_API_KEY="$3" codex exec \
                   --model "$2" \
+                  $effort_conf \
                   --dangerously-bypass-approvals-and-sandbox \
                   --json \
                   --output-last-message "$5.txt" \
-                  - < "$4" > "$5.events"
+                  - < "$4" > "$5.events" || codex_rc=$?
                 python3 -c '
           import json, sys, pathlib
           base = sys.argv[1]
-          result = pathlib.Path(base + ".txt").read_text()
+          txt = pathlib.Path(base + ".txt")
+          result = txt.read_text() if txt.exists() else ""
+          events = pathlib.Path(base + ".events")
+          lines = events.read_text().splitlines() if events.exists() else []
           usage = {}
-          for line in pathlib.Path(base + ".events").read_text().splitlines():
+          for line in lines:
               try:
                   event = json.loads(line)
               except ValueError:
@@ -317,6 +334,7 @@ jobs:
           envelope = {"result": result,
                       "usage": {k: v for k, v in mapped.items() if v is not None}}
           print(json.dumps(envelope))' "$5" > "$5"
+                return "$codex_rc"
                 ;;
               gemini)
                 # Gemini CLI's built-in toolset includes shell and file writes,

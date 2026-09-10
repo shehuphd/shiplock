@@ -17,9 +17,17 @@ semantic versioning.
   a progress log. Adding it was one registry row plus its invocation block, the
   extension point 0.4.0's adapter registry opened; no consumer input changes.
 - The shared `audit-effort` input now maps to Gemini's `thinkingLevel`
-  (`low`/`medium`/`high`) as well as Claude's `--effort`, so one input sets
-  reasoning effort across providers. Empty leaves each its own default (Gemini
-  3 defaults to high).
+  (`low`/`medium`/`high`) and to Codex's `model_reasoning_effort` as well as
+  Claude's `--effort`, so one input sets reasoning effort across all three
+  adapters. Empty leaves each its own default (Gemini 3 defaults to high).
+
+### Fixed
+- The `openai`/Codex adapter no longer masks its own exit code. The mapper that
+  reshapes Codex's output into the shared envelope always exits clean, so a
+  Codex primary that died after writing partial output reported success and the
+  gate never failed over. The branch now captures Codex's exit and returns it,
+  matching the Gemini branch's fix; the mapper also tolerates a missing
+  last-message file from a failed run.
 
 ## [0.4.0] - 2026-09-09
 
