@@ -3,7 +3,7 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
-## [0.5.0] - 2026-09-09
+## [0.5.0] - 2026-09-10
 
 ### Added
 - A third audit adapter, `google` (runs Google's Gemini CLI), alongside
