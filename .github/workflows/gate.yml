@@ -56,13 +56,16 @@ on:
         default: "dontAsk"
       audit-effort:
         description: >-
-          Claude Code's reasoning effort for the audit run: low, medium,
-          high, xhigh, or max (anthropic keys only; codex has no equivalent
-          flag). Defaults to high. Lower it to cut cost when a blocked
-          release is all you need from a failed audit; raise it to xhigh if
-          audits still miss drift your repo's own review would have caught.
-          Effort trades cost for how much the model reasons before
-          answering, not just how much it writes.
+          Reasoning effort for the audit run: low, medium, high, xhigh, or
+          max. Defaults to high. An anthropic key maps it to Claude Code's
+          --effort; a google key maps it to Gemini's thinkingLevel (low,
+          medium, high, with xhigh and max clamped to high; medium is
+          gemini-3.1-pro only, and Gemini 3 already defaults to high). Codex
+          has no equivalent, so it's ignored for openai keys. Lower it to cut
+          cost when a blocked release is all you need from a failed audit;
+          raise it if audits miss drift your repo's own review would have
+          caught. Effort trades cost for how much the model reasons before it
+          answers.
         type: string
         default: "high"
     secrets:
@@ -332,10 +335,25 @@ jobs:
                 # claude's Write(audit-progress.md) does, so it gets no write
                 # tool at all: a gemini primary that dies restarts on the
                 # fallback rather than continuing from a log it couldn't write.
+                # Build the workspace settings: the read-only tool allowlist
+                # always, plus a per-model thinking-level override when
+                # audit-effort is set (Gemini's analog of Claude's --effort).
+                # Gemini 3 defaults to high, so an empty effort leaves it there.
                 mkdir -p .gemini
-                cat > .gemini/settings.json <<'JSON'
-          {"tools": {"core": ["read_file", "read_many_files", "list_directory", "glob", "grep_search"]}}
-          JSON
+                python3 - "$2" "${{ inputs.audit-effort }}" > .gemini/settings.json <<'PY'
+          import json, sys
+          model, effort = sys.argv[1], sys.argv[2].strip().lower()
+          settings = {"tools": {"core": [
+              "read_file", "read_many_files", "list_directory", "glob", "grep_search"]}}
+          level = {"low": "low", "medium": "medium", "high": "high",
+                   "xhigh": "high", "max": "high"}.get(effort)
+          if level:
+              settings["modelConfigs"] = {"overrides": [{
+                  "match": {"model": model},
+                  "modelConfig": {"generateContentConfig": {
+                      "thinkingConfig": {"thinkingLevel": level}}}}]}
+          print(json.dumps(settings))
+          PY
                 # --output-format json returns one object: response plus a stats
                 # block whose per-model token counts price the run. prompt is
                 # input, candidates + thoughts is output (reasoning included),

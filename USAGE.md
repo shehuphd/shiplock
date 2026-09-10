@@ -318,7 +318,7 @@ The workflow's inputs:
 | `audit-model` | `""` | The audit's model, in the key's provider's own naming. Required when `run-audit` is true. |
 | `audit-fallback-model` | `""` | The fallback attempt's model, in the fallback key's provider's naming. Empty reuses `audit-model` when both keys name the same provider; a cross-provider fallback must declare its own. |
 | `audit-permission-mode` | `"dontAsk"` | The permission mode for the read-only run (`anthropic` keys only). |
-| `audit-effort` | `"high"` | Claude's reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`; `anthropic` keys only). Lower it to cut cost when a blocked release is all you need from a failed audit; raise it to `xhigh` if audits still miss drift your own review would have caught. Effort trades cost for how much the model reasons before answering, not just how much it writes. |
+| `audit-effort` | `"high"` | Reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`). An `anthropic` key maps it to Claude Code's `--effort`; a `google` key maps it to Gemini's `thinkingLevel` (`low`, `medium`, `high`, with `xhigh`/`max` clamped; `medium` is gemini-3.1-pro only, and Gemini 3 defaults to high). `openai`/Codex has no equivalent and ignores it. Lower it to cut cost when a blocked release is all you need from a failed audit; raise it if audits miss drift your own review would have caught. |
 
 ### App repos and other non-packages
 

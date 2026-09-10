@@ -16,6 +16,10 @@ semantic versioning.
   primary that dies mid-run restarts on the fallback rather than continuing from
   a progress log. Adding it was one registry row plus its invocation block, the
   extension point 0.4.0's adapter registry opened; no consumer input changes.
+- The shared `audit-effort` input now maps to Gemini's `thinkingLevel`
+  (`low`/`medium`/`high`) as well as Claude's `--effort`, so one input sets
+  reasoning effort across providers. Empty leaves each its own default (Gemini
+  3 defaults to high).
 
 ## [0.4.0] - 2026-09-09
 

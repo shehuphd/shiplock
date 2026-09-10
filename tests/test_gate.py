@@ -366,6 +366,35 @@ def test_gemini_runs_read_only_and_maps_its_usage(gate):
     assert "run_shell_command" not in settings
 
 
+def test_gemini_maps_effort_to_a_thinking_level_override(gate):
+    # audit-effort is the universal reasoning knob: for a google key it becomes
+    # a per-model thinkingLevel override in the workspace settings.
+    primary = f"google/{PRIMARY_BARE_KEY}"
+    setup = gate(STEP_RUNNERS, primary=primary, model="gemini-3.1-pro-preview", effort="low")
+    assert setup.returncode == 0, setup.stderr
+    audit = gate(STEP_AUDIT, primary=primary, model="gemini-3.1-pro-preview", effort="low")
+    assert audit.returncode == 0, audit.stderr
+
+    settings = json.loads((gate.work / ".gemini" / "settings.json").read_text())
+    override = settings["modelConfigs"]["overrides"][0]
+    assert override["match"]["model"] == "gemini-3.1-pro-preview"
+    thinking = override["modelConfig"]["generateContentConfig"]["thinkingConfig"]
+    assert thinking["thinkingLevel"] == "low"
+    # the read-only allowlist is still present alongside the override
+    assert "read_file" in settings["tools"]["core"]
+    assert "write_file" not in settings["tools"]["core"]
+
+
+def test_gemini_sets_no_thinking_override_when_effort_is_unset(gate):
+    # Empty effort leaves Gemini at its own default (high); no override written.
+    primary = f"google/{PRIMARY_BARE_KEY}"
+    gate(STEP_RUNNERS, primary=primary, model="gemini-3.1-pro-preview")
+    audit = gate(STEP_AUDIT, primary=primary, model="gemini-3.1-pro-preview")
+    assert audit.returncode == 0, audit.stderr
+    settings = json.loads((gate.work / ".gemini" / "settings.json").read_text())
+    assert "modelConfigs" not in settings
+
+
 # --- install gating: an app repo must not be forced to be installable ------
 
 

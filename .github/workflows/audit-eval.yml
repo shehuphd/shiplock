@@ -17,8 +17,9 @@ on:
         default: "gemini-3.1-pro-preview"
       audit-effort:
         description: >-
-          Reasoning effort for the run (anthropic keys only; ignored by other
-          providers). Empty leaves the CLI default.
+          Reasoning effort for the run (low, medium, high). Maps to Claude's
+          --effort for an anthropic key and to Gemini's thinkingLevel for a
+          google key; Codex ignores it. Empty leaves each provider's default.
         type: string
         default: ""
 
