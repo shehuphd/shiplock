@@ -28,6 +28,12 @@ semantic versioning.
   gate never failed over. The branch now captures Codex's exit and returns it,
   matching the Gemini branch's fix; the mapper also tolerates a missing
   last-message file from a failed run.
+- Documentation corrections surfaced by an audit of shiplock's own tree:
+  `needs-import` is now named in the command lists in `cli.py`, `__init__.py`,
+  and ARCHITECTURE; the ablation prompt is described as the second prompt, not a
+  third; ARCHITECTURE lists `audit-eval.yml` among the workflows; and the exit-2
+  row no longer lists a missing `shiplock.toml`, since an absent config runs the
+  default pass (exit 0 or 1) rather than erroring.
 
 ## [0.4.0] - 2026-09-09
 

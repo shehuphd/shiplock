@@ -3,8 +3,9 @@
 Each consuming repo declares its own surfaces here: which docs are public, which
 sources get swept for banned words, which objects must be covered in which doc,
 and so on. Every section is optional; a check whose section is absent skips with
-a notice rather than inventing a default. The one hard requirement is that the
-file exists and parses.
+a notice rather than inventing a default. ``load_config`` requires the file to
+exist and parse; a repo with no ``shiplock.toml`` gets ``default_config``
+instead, which checks what's detectable.
 
 A malformed config raises ``ConfigError``, which the CLI turns into exit code 2
 (usage/config error), kept distinct from exit 1 (a check found a problem).

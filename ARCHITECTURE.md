@@ -86,7 +86,7 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
 shiplock/
 ├── src/shiplock/
 │   ├── __init__.py       # public API re-exports and __version__
-│   ├── cli.py            # command-line entry point (check, prompt)
+│   ├── cli.py            # command-line entry point (check, prompt, needs-import)
 │   ├── _compat.py        # version-guarded imports (tomllib), defined once
 │   ├── _config.py        # shiplock.toml loader and typed config model
 │   ├── _checks.py        # the eleven checks and the runner
@@ -98,7 +98,7 @@ shiplock/
 │       ├── audit.md      # the semantic audit prompt (shipped as package data)
 │       └── ablation.md   # the advisory ablation prompt (shipped as package data)
 ├── .github/
-│   ├── workflows/        # gate.yml (reusable), tests.yml, release-gate.yml, release.yml
+│   ├── workflows/        # gate.yml (reusable), tests.yml, release-gate.yml, release.yml, audit-eval.yml
 │   └── dependabot.yml
 ├── scripts/
 │   └── mutation_check.py # breaks each check to confirm its test guards it
@@ -137,7 +137,7 @@ shiplock check
 
 | Module | Responsibility |
 |---|---|
-| `cli` | Parses arguments, dispatches `check` and `prompt`, renders the report, owns the exit-code contract. Greets a bare invocation, translates argparse errors into sentences with fuzzy command suggestions, and colors the finding/clean categories on a tty (`NO_COLOR` honored). |
+| `cli` | Parses arguments, dispatches `check`, `prompt`, and `needs-import`, renders the report, owns the exit-code contract. Greets a bare invocation, translates argparse errors into sentences with fuzzy command suggestions, and colors the finding/clean categories on a tty (`NO_COLOR` honored). |
 | `_compat` | Version-guarded imports in one place: `tomllib` from the standard library on 3.11+, the `tomli` backport on 3.10. |
 | `_config` | Reads `shiplock.toml`, validates it, and returns a frozen `Config` of typed sections. Raises `ConfigError` on anything malformed. |
 | `_checks` | Holds the eleven check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
@@ -212,6 +212,10 @@ CI lives in `.github/workflows/`:
 - `release.yml` — publishes to PyPI via trusted publishing (OIDC) when a GitHub
   Release is published, behind the `release` environment's required-reviewer
   approval.
+- `audit-eval.yml` — a dispatch-only harness that runs one audit adapter end
+  to end over this repo, apart from `release-gate.yml` so shiplock's own audit
+  config is undisturbed. It exercises a provider's detection quality on a
+  branch of planted defects; it's not part of the release path.
 
 `dependabot.yml` keeps the action and pip versions current.
 

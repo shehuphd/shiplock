@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-# CLAUDE.md's list plus the inflections seen in live sweeps. Word-boundary
+# The house banned-word list plus the inflections seen in live sweeps. Word-boundary
 # matching keeps substrings inside larger identifiers from false-positiving.
 BANNED_WORDS = frozenset(
     {

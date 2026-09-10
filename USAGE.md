@@ -230,7 +230,7 @@ reason and the fix, and the run continues either way.
 |---|---|
 | 0 | Clean: no check produced a finding. |
 | 1 | One or more checks found a problem. |
-| 2 | A config or usage error (no `shiplock.toml`, malformed TOML, a bad flag). |
+| 2 | A config or usage error (malformed TOML, a bad flag). |
 
 Findings print to stdout; notices and the summary print to stderr, so stdout
 stays clean for a pipe. This makes `shiplock check` both a CI step and a pytest

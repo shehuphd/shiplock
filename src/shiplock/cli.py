@@ -1,4 +1,4 @@
-"""Command-line entry point: ``shiplock check`` and ``shiplock prompt``.
+"""Command-line entry point: ``shiplock check``, ``shiplock prompt``, and ``shiplock needs-import``.
 
 Exit codes are contractual: 0 clean, 1 a check found a problem, 2 a config or
 usage error. Findings print to stdout (the answer to what was asked); notices

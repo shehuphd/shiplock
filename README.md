@@ -80,7 +80,7 @@ Print the audit prompt with:
 shiplock prompt
 ```
 
-There's also an advisory third prompt, outside the gate: `shiplock prompt
+There's also a second, advisory prompt, outside the gate: `shiplock prompt
 ablation` prints a prompt for an agent to report what the repo could remove,
 merge, or make cheaper, with findings split into mechanical folds and decisions
 for the owner. It renders a report, never a verdict.
