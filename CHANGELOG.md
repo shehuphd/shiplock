@@ -34,6 +34,18 @@ semantic versioning.
   third; ARCHITECTURE lists `audit-eval.yml` among the workflows; and the exit-2
   row no longer lists a missing `shiplock.toml`, since an absent config runs the
   default pass (exit 0 or 1) rather than erroring.
+- The audit verdict is matched against the full contract: the final non-blank
+  line must be the whole-line `AUDIT: PASS` or `AUDIT: FAIL`. A loose prefix
+  match had accepted `AUDIT: PASSING`, a verdict with trailing text, or a
+  verdict that wasn't the last line; each now fails closed.
+- `version` and `coverage` introspection validates the queried module's own
+  origin, not only the top-level package's, so a namespace submodule that
+  resolves to an install outside the checked root is flagged (`not_under_root`)
+  rather than read as the wrong code.
+- On failover, the interrupted attempt's whole output bundle is preserved (the
+  envelope plus the provider's intermediate files) before the fallback reuses
+  the `audit.json` names, and the debug-artifact upload now includes Gemini's
+  raw response for both attempts.
 
 ## [0.4.0] - 2026-09-09
 

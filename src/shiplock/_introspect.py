@@ -60,8 +60,11 @@ for query in request["queries"]:
     try:
         module_name = query.get("module") or query["target"].split(":", 1)[0]
         module = importlib.import_module(module_name)
-        top = importlib.import_module(module_name.split(".")[0])
-        if not under_root(top):
+        # Validate the queried module's own origin, not just the top-level
+        # package's: a namespace package can resolve its root under the checked
+        # tree while a submodule loads from an install elsewhere. The module
+        # whose attributes get read is the one whose location has to be under root.
+        if not under_root(module):
             results[qid] = {"status": "not_under_root"}
             continue
         if op == "version":

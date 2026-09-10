@@ -412,9 +412,16 @@ jobs:
             "$(key_of "$PRIMARY_KEY")" audit-prompt.md audit.json || rc=$?
           if [ "$rc" -ne 0 ] && [ -n "${{ steps.runners.outputs.fallback-runner }}" ]; then
             echo "first attempt (${{ steps.runners.outputs.primary-provider }}) exited $rc; continuing on ${{ steps.runners.outputs.fallback-provider }}" >&2
-            # A first attempt that died before writing output still leaves an
-            # (empty) marker, so the usage table shows both attempts.
-            mv audit.json audit-first.json 2>/dev/null || : > audit-first.json
+            # Preserve attempt 1's whole output bundle before attempt 2
+            # overwrites the audit.json* names: the envelope and whatever
+            # intermediates its provider wrote (codex's .events/.txt, gemini's
+            # .raw). A first attempt that died before writing anything still
+            # leaves an empty audit-first.json marker, so the usage table shows
+            # both attempts.
+            for suffix in "" .events .txt .raw; do
+              [ -e "audit.json$suffix" ] && mv "audit.json$suffix" "audit-first.json$suffix"
+            done
+            [ -e audit-first.json ] || : > audit-first.json
             {
               echo "The previous run of this audit was interrupted mid-way by an API failure."
               echo "Its progress log, if one exists at audit-progress.md, records the questions already settled — continue from the first question it doesn't cover, per the instructions below."
@@ -536,19 +543,24 @@ jobs:
             echo "::error::the audit result carried no text" >&2
             exit 1
           fi
-          verdict="$(grep -E '^AUDIT: (PASS|FAIL)' audit-output.txt | tail -1 || true)"
-          if echo "$verdict" | grep -q 'AUDIT: FAIL'; then
+          # The verdict contract: the audit's final non-blank line is exactly
+          # "AUDIT: PASS" or "AUDIT: FAIL". Match the whole line (trailing
+          # whitespace tolerated, nothing else), so "AUDIT: PASSING", a verdict
+          # with trailing text, or a verdict that isn't the last line all fail
+          # closed rather than passing on a loose substring.
+          verdict="$(grep -v '^[[:space:]]*$' audit-output.txt | tail -1 | sed 's/[[:space:]]*$//')"
+          if [ "$verdict" = "AUDIT: FAIL" ]; then
             printf '\n\n---\n%s\n' "$usage_line" >> audit-output.txt
             gh issue create \
               --title "Shiplock audit failed on ${GITHUB_SHA::7}" \
               --body-file audit-output.txt
             echo "::error::semantic audit failed; opened an issue" >&2
             exit 1
-          elif echo "$verdict" | grep -q 'AUDIT: PASS'; then
+          elif [ "$verdict" = "AUDIT: PASS" ]; then
             echo "semantic audit passed — $usage_line"
           else
-            # No verdict line is not a pass. Fail closed.
-            echo "::error::no AUDIT verdict line found in the audit output" >&2
+            # Anything but an exact final verdict line is not a pass. Fail closed.
+            echo "::error::no valid AUDIT verdict line found in the audit output" >&2
             exit 1
           fi
 
@@ -568,9 +580,11 @@ jobs:
             audit.json
             audit.json.events
             audit.json.txt
+            audit.json.raw
             audit-first.json
             audit-first.json.events
             audit-first.json.txt
+            audit-first.json.raw
             audit-output.txt
           if-no-files-found: ignore
           retention-days: 7

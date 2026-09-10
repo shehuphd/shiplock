@@ -20,6 +20,22 @@ def test_introspect_flags_a_module_resolving_outside_root(tmp_path):
     assert result["j"]["status"] == "not_under_root"
 
 
+def test_introspect_flags_a_submodule_resolving_outside_root(tmp_path, monkeypatch):
+    # A namespace package split across the checked root and an external
+    # location: the top-level package resolves under root (its first __path__
+    # entry is here), but the queried submodule loads from outside it. Checking
+    # only the top-level package would read this as ok; the submodule's own
+    # origin has to be validated.
+    root = tmp_path / "root"
+    external = tmp_path / "external"
+    (root / "nsdemo").mkdir(parents=True)          # namespace portion under root
+    (external / "nsdemo").mkdir(parents=True)      # namespace portion outside root
+    (external / "nsdemo" / "sub.py").write_text('__version__ = "1.0.0"\n', encoding="utf-8")
+    monkeypatch.setenv("PYTHONPATH", str(external))
+    result = introspect(root, [{"id": "s", "op": "version", "module": "nsdemo.sub"}])
+    assert result["s"]["status"] == "not_under_root"
+
+
 def test_introspect_reports_import_error_as_a_status(tmp_path):
     result = introspect(tmp_path, [{"id": "x", "op": "version", "module": "no_such_xyz"}])
     assert result["x"]["status"] == "error"

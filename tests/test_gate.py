@@ -182,6 +182,7 @@ def gate(tmp_path, monkeypatch):
     run.output_file = gh_output
     run.summary_file = gh_summary
     run.work = work
+    run.bin_dir = bin_dir
     return run
 
 
@@ -344,6 +345,85 @@ def test_rates_prices_each_provider_from_its_own_usage(gate):
     # n/a" — proving rates actually priced it rather than degrading silently.
     summary = gate.summary_file.read_text()
     assert "| 2 (continued, openai) | 50 | 900 | 40000 | n/a | 0.0196 |" in summary
+
+
+def _judge(gate, result_text):
+    """Seed audit.json with a chosen result and run the verdict step over it."""
+    primary = f"anthropic/{PRIMARY_BARE_KEY}"
+    gate(STEP_RUNNERS, primary=primary)
+    (gate.work / "audit.json").write_text(json.dumps({"result": result_text}))
+    return gate(STEP_VERDICT, primary=primary)
+
+
+def test_verdict_accepts_an_exact_final_line_with_trailing_space(gate):
+    # The contract line is the last non-blank line; trailing whitespace and
+    # trailing blank lines are tolerated.
+    result = _judge(gate, "read the docs\nAUDIT: PASS  \n\n")
+    assert result.returncode == 0, result.stderr
+    assert "semantic audit passed" in result.stdout
+
+
+def test_verdict_opens_an_issue_on_an_exact_fail(gate):
+    result = _judge(gate, "found a problem\nAUDIT: FAIL")
+    assert result.returncode == 1
+    assert "semantic audit failed" in result.stderr
+
+
+def test_verdict_rejects_a_passing_lookalike(gate):
+    # "AUDIT: PASSING" is not the verdict; a loose substring match would have
+    # read it as a pass. Fail closed.
+    result = _judge(gate, "all green\nAUDIT: PASSING")
+    assert result.returncode == 1
+    assert "no valid AUDIT verdict" in result.stderr
+
+
+def test_verdict_rejects_text_after_the_verdict_line(gate):
+    # A verdict that isn't the final line violates the contract: content after
+    # it means the run didn't end on a clean verdict. Fail closed.
+    result = _judge(gate, "notes\nAUDIT: PASS\nHope this helps!")
+    assert result.returncode == 1
+    assert "no valid AUDIT verdict" in result.stderr
+
+
+def test_failover_preserves_the_interrupted_attempts_output_bundle(gate):
+    # A primary that writes a full bundle (envelope plus a provider's
+    # intermediates) then dies must have every piece preserved under
+    # audit-first.* before the fallback reuses the audit.json* names, so the
+    # failed first attempt stays debuggable. The claude stub here stands in for
+    # a codex/gemini primary by leaving .events/.raw beside its envelope.
+    primary = f"anthropic/{PRIMARY_BARE_KEY}"
+    fallback = f"openai/{FALLBACK_BARE_KEY}"
+    _write_stub(
+        gate.bin_dir,
+        "claude",
+        f'[ "$ANTHROPIC_API_KEY" = "{PRIMARY_BARE_KEY}" ] || {{ echo "wrong key" >&2; exit 99; }}\n'
+        'printf "partial events\\n" > audit.json.events\n'
+        'printf "partial raw\\n" > audit.json.raw\n'
+        'printf "Q1 settled\\n" > audit-progress.md\n'
+        'printf "{\\"result\\":\\"partial\\"}\\n"\n'
+        'echo "stub claude: dying after partial output" >&2\n'
+        "exit 1\n",
+    )
+    gate(STEP_RUNNERS, primary=primary, fallback=fallback, fb_model="gpt-test")
+    gate(STEP_AUDIT, primary=primary, fallback=fallback, fb_model="gpt-test")
+    assert (gate.work / "audit-first.json.events").read_text() == "partial events\n"
+    assert (gate.work / "audit-first.json.raw").read_text() == "partial raw\n"
+    assert json.loads((gate.work / "audit-first.json").read_text())["result"] == "partial"
+    # The fallback's fresh output owns the audit.json* names.
+    assert json.loads((gate.work / "audit.json").read_text())["result"]
+
+
+def test_upload_step_keeps_every_attempts_raw_output():
+    doc = yaml.safe_load(GATE.read_text())
+    upload = next(
+        step for step in doc["jobs"]["audit"]["steps"]
+        if step.get("name", "").startswith("Upload audit debug")
+    )
+    paths = upload["with"]["path"]
+    # Gemini's raw response file, for both the sole and the interrupted-first
+    # attempt, must be in the debug bundle.
+    assert "audit.json.raw" in paths
+    assert "audit-first.json.raw" in paths
 
 
 def test_google_provider_installs_the_gemini_runner(gate):
