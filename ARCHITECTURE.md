@@ -60,11 +60,11 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
 
 | Cause | Handling |
 |---|---|
-| Missing or malformed `shiplock.toml` | `ConfigError`, rendered as one plain sentence on stderr; exit 2 |
+| Malformed `shiplock.toml` | `ConfigError`, rendered as one plain sentence on stderr; exit 2. A missing file isn't an error: `check` runs the default pass |
 | A check finds a docs-vs-code disagreement | `Finding` on stdout; exit 1 |
 | A check's prerequisite is absent (no git tag, package won't import, glob matches nothing) | `Notice` on stderr naming the reason and fix; the run continues, and a skip is never a silent pass |
 | A swept file is unreadable or not valid UTF-8 | Read leniently or skipped by `_read_text`; ASCII patterns still match |
-| The CI audit dies mid-run | The fallback key's attempt continues from the audit's own progress log; a missing verdict line fails closed |
+| The CI audit dies mid-run | The fallback key's attempt continues from the audit's progress log where the interrupted adapter could write one (Claude, Codex); a Gemini primary has no write tool, so its fallback restarts. A missing verdict line fails closed |
 | No audit key secret configured in CI | The audit is skipped with a workflow warning; the deterministic checks still gate the run |
 
 ### Observability
@@ -213,7 +213,9 @@ CI lives in `.github/workflows/`:
   usage and a [rates](https://pypi.org/project/rates/)-priced USD cost to the
   job summary (and the issue footer). With a fallback key from a
   second provider configured, an interrupted audit continues from its own
-  progress log instead of restarting. With no key secret set at all, the audit
+  progress log where the primary adapter could write one (Claude, Codex); a
+  Gemini primary, run without a write tool, restarts on the fallback instead.
+  With no key secret set at all, the audit
   is skipped with a warning and the deterministic checks still gate the run.
   Any repo consumes it with
   `uses: shehuphd/shiplock/.github/workflows/gate.yml@main`.

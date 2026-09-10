@@ -32,8 +32,11 @@ semantic versioning.
   `needs-import` is now named in the command lists in `cli.py`, `__init__.py`,
   and ARCHITECTURE; the ablation prompt is described as the second prompt, not a
   third; ARCHITECTURE lists `audit-eval.yml` among the workflows; and the exit-2
-  row no longer lists a missing `shiplock.toml`, since an absent config runs the
-  default pass (exit 0 or 1) rather than erroring.
+  row no longer lists a missing `shiplock.toml` in ARCHITECTURE or USAGE, since
+  an absent config runs the default pass (exit 0 or 1) rather than erroring; and
+  the failover-continuation note is scoped to the adapters that can write a
+  progress log (Claude, Codex), since a Gemini primary runs read-only and
+  restarts on the fallback.
 - The audit verdict is matched against the full contract: the final non-blank
   line must be the whole-line `AUDIT: PASS` or `AUDIT: FAIL`. A loose prefix
   match had accepted `AUDIT: PASSING`, a verdict with trailing text, or a

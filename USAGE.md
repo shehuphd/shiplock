@@ -399,11 +399,13 @@ deterministic checks still gate it, and the warning keeps the skip visible.
 
 Add an `AUDIT_FALLBACK_API_KEY` secret (same `provider/key` format) and an
 audit whose first attempt dies mid-run — a revoked key, an exhausted
-credit balance — is continued rather than redone. The mechanism is
-provider-neutral: as the audit settles each question it appends a line to a
-progress log in the workspace, and the second attempt reads that log, keeps the
-settled answers, and works on from the first uncovered question. The job summary
-then shows both attempts' usage.
+credit balance — is continued rather than redone. The mechanism is a shared
+progress log: as the audit settles each question the adapter appends a line to a
+log in the workspace, and the second attempt reads that log, keeps the settled
+answers, and works on from the first uncovered question. This needs the
+interrupted adapter to hold a write tool — Claude and Codex do; a Gemini primary
+runs read-only, so a Gemini interruption restarts on the fallback rather than
+continuing. The job summary then shows both attempts' usage.
 
 The fallback belongs on a **different provider or billing account** than the
 primary — credit exhaustion is an account-level event, so a sibling key from the
