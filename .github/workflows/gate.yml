@@ -51,7 +51,7 @@ on:
         type: string
         default: ""
       audit-permission-mode:
-        description: "Claude Code permission mode for the read-only audit run (anthropic keys only)"
+        description: "Claude Code permission mode for the audit run (anthropic keys only)"
         type: string
         default: "dontAsk"
       audit-effort:
@@ -253,9 +253,10 @@ jobs:
           if [ -n "${FALLBACK_KEY:-}" ]; then
             echo "::add-mask::$(key_of "$FALLBACK_KEY")"
           fi
-          # One adapter per runner: read-only tools, JSON-ish output captured
-          # to the named file, the runner's own key variable set from the
-          # neutral secret. The prompt's progress log (audit-progress.md) is
+          # One adapter per runner, each given only the tools the audit needs:
+          # read and grep, plus a scoped progress-log write for Claude and a
+          # sandbox bypass for Codex. JSON-ish output captured to the named
+          # file, the runner's own key variable set from the neutral secret. The prompt's progress log (audit-progress.md) is
           # the state a second attempt continues from — it works across
           # providers, unlike any one provider's session store.
           run_attempt() {  # $1 runner, $2 model, $3 key, $4 prompt-file, $5 out-file

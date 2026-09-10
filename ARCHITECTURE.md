@@ -154,7 +154,7 @@ shiplock check
 |---|---|
 | `cli` | Parses arguments, dispatches `check`, `prompt`, and `needs-import`, renders the report, owns the exit-code contract. Greets a bare invocation, translates argparse errors into sentences with fuzzy command suggestions, and colors the finding/clean categories on a tty (`NO_COLOR` honored). |
 | `_compat` | Version-guarded imports in one place: `tomllib` from the standard library on 3.11+, the `tomli` backport on 3.10. |
-| `_config` | Reads `shiplock.toml`, validates it, and returns a frozen `Config` of typed sections. Raises `ConfigError` on anything malformed. |
+| `_config` | Reads `shiplock.toml`, validates it, and returns a frozen `Config` of typed sections. Raises `ConfigError` on an unknown top-level section, a wrong-typed value, or a section missing a required field. |
 | `_checks` | Holds the eleven check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
 | `_report` | Defines `Finding` (a disagreement), `Notice` (a skip with a reason), and `Report` (both, plus `ok`). |
 | `_style` | Defines the house banned-word list and the word-boundary matcher. Carved out of shiplock's own sweep, since it has to name the words. |

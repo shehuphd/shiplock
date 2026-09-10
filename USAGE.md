@@ -317,7 +317,7 @@ The workflow's inputs:
 | `run-audit` | `true` | Whether the semantic audit job runs at all. |
 | `audit-model` | `""` | The audit's model, in the key's provider's own naming. Required when `run-audit` is true. |
 | `audit-fallback-model` | `""` | The fallback attempt's model, in the fallback key's provider's naming. Empty reuses `audit-model` when both keys name the same provider; a cross-provider fallback must declare its own. |
-| `audit-permission-mode` | `"dontAsk"` | The permission mode for the read-only run (`anthropic` keys only). |
+| `audit-permission-mode` | `"dontAsk"` | The Claude Code permission mode for the audit run (`anthropic` keys only). |
 | `audit-effort` | `"high"` | Reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`). An `anthropic` key maps it to Claude Code's `--effort`; a `google` key maps it to Gemini's `thinkingLevel` (`low`, `medium`, `high`, with `xhigh`/`max` clamped; `medium` is gemini-3.1-pro only, and Gemini 3 defaults to high). An `openai` key maps it to Codex's `model_reasoning_effort`. Lower it to cut cost when a blocked release is all you need from a failed audit; raise it if audits miss drift your own review would have caught. |
 
 ### App repos and other non-packages
@@ -333,9 +333,9 @@ repo it's run in, and installs only on `true`.
 ### The audit key declares its provider
 
 Shiplock is provider-agnostic by default. Pick your own audit provider: the
-prompt is plain markdown, the tools are read-only, and the verdict contract is
-one greppable line, so any agent CLI that can read files and print text can run
-the audit. The verdict's authority comes from the checklist, never from which
+prompt is plain markdown, the checklist only needs to read files, and the
+verdict contract is one greppable line, so any agent CLI that can read files and
+print text can run the audit. The verdict's authority comes from the checklist, never from which
 vendor executed it.
 
 Don't hardcode a provider. A vendor name baked into a consuming repo, a secret,
@@ -362,12 +362,15 @@ anyone's secrets: when another vendor ships a headless agent CLI, wiring it in
 means teaching the gate that prefix, and a consumer then reaches it by changing
 the prefix and the model name.
 
-Every adapter runs the audit read-only: the tools it exposes to the agent are
-scoped to reading files (for Gemini CLI, whose built-in toolset otherwise
-includes shell and file writes, the gate restricts it to read-only tools for
-the run). One consequence for Gemini: it isn't given a scoped write tool, so a
-Gemini primary that dies mid-run restarts on the fallback rather than continuing
-from a progress log, where Claude and Codex continue.
+The audit only needs to read files, but the tools each adapter is given differ.
+Gemini CLI ships shell and file-write tools, so the gate restricts it to a
+read-only allowlist. Claude runs with read and grep tools plus one scoped write,
+to `audit-progress.md` (the failover log). Codex runs under
+`--dangerously-bypass-approvals-and-sandbox`, since its own sandbox can't nest
+in the CI runner, so the gate doesn't restrict its tool scope. One consequence
+for Gemini: without a write tool it can't keep a progress log, so a Gemini
+primary that dies mid-run restarts on the fallback rather than continuing, where
+Claude and Codex continue.
 
 Because the provider names the model namespace, `audit-model` has no default:
 declare it in your provider's own naming. The `check` job needs no key.
