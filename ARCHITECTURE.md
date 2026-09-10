@@ -1,11 +1,11 @@
 # Architecture
 
-What this document holds: a quick-reference STRuFO summary of shiplock, then
+What this document holds: a quick-reference STRuFOL summary of shiplock, then
 the full map of its structure, components, integrations, and testing.
 
-## STRuFO
+## STRuFOL
 
-[S]hape, [T]echnical stack, [Ru]n details, [F]ailure modes, [O]bservability.
+[S]hape, [T]echnical stack, [Ru]n details, [F]ailure modes, [O]bservability, [L]imitations.
 
 ### Shape
 
@@ -79,6 +79,21 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
   rates-priced USD cost; a failed audit opens an issue carrying its findings,
   and a failed run uploads the audit's raw output as an
   `audit-debug-<run id>` artifact.
+
+### Limitations
+
+- The checks assume a Python repo: `version` and `coverage` import a Python
+  package, and `deps-declared-once` reads `pyproject.toml`. Other language
+  ecosystems aren't covered.
+- `shiplock` doesn't run the semantic audit itself: `shiplock prompt` only
+  prints the prompt, and running it takes an external agent CLI plus a
+  billable API key, wired up in the CI gate.
+- The shipped CI wiring is GitHub Actions only: the reusable gate, the
+  issue-on-failure step, and trusted publishing all assume GitHub.
+- `versioned-files` and `manifest` depend on the `git` CLI and a reachable
+  tag; without either, they skip with a notice instead of checking.
+- The `internal-refs` pattern set is fixed; a repo with a differently named
+  internal folder needs the pattern list widened before the check sees it.
 
 ## Project structure
 
