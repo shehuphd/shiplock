@@ -433,7 +433,7 @@ jobs:
           }
           rates_cost() {  # $1 json-file $2 provider $3 model
             python3 -c '
-          import json, pathlib, sys
+          import json, pathlib, sys, io, contextlib
 
           def cost(path, provider, model):
               try:
@@ -472,7 +472,12 @@ jobs:
                   total += tokens * rate / 1_000_000
               return f"{total:.4f}"
 
-          print(cost(*sys.argv[1:4]))
+          # rates 1.0.0 prints a trace object to stdout on load; capture it into
+          # a throwaway buffer so only the cost reaches stdout, which this
+          # function returns via command substitution.
+          with contextlib.redirect_stdout(io.StringIO()):
+              _result = cost(*sys.argv[1:4])
+          print(_result)
           ' "$1" "$2" "$3" 2>/dev/null || echo "n/a"
           }
           # The fallback model mirrors run_attempt's own default: an unset
