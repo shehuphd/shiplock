@@ -96,6 +96,15 @@ def gate(tmp_path, monkeypatch):
     work.mkdir()
 
     _write_stub(bin_dir, "npm", 'echo "stub npm $*" >&2\n')
+    # keycall pre-flights each audit key; the stub accepts every key and
+    # records its argv so a test can assert which provider it was asked
+    # to verify. Tests that need a rejected key overwrite this stub.
+    _write_stub(
+        bin_dir,
+        "keycall",
+        'printf "%s\\n" "$@" >> keycall-argv.txt\n'
+        'echo "stub keycall: key accepted"\n',
+    )
     _write_stub(bin_dir, "gh", 'echo "stub gh $*" >&2\n')
     _write_stub(bin_dir, "shiplock", 'echo "checklist ending in a verdict line"\n')
     # The claude stub asserts the bare key arrived case-preserved, records its
@@ -267,6 +276,65 @@ def test_malformed_fallback_key_is_rejected_up_front(gate):
     )
     assert result.returncode != 0
     assert "AUDIT_FALLBACK_API_KEY" in result.stderr
+
+
+def test_an_anthropic_model_name_is_refused_on_an_openai_key(gate):
+    r = gate(STEP_RUNNERS, primary=f"openai/{PRIMARY_BARE_KEY}", model="sonnet")
+    assert r.returncode != 0
+    assert "anthropic naming" in r.stderr
+    assert "openai" in r.stderr
+    assert "keycall verify" in r.stderr
+
+
+def test_an_openai_model_name_is_refused_on_an_anthropic_key(gate):
+    # The misconfiguration this check exists for: a gpt name against an
+    # anthropic key, which otherwise 404s at run time after an attempt
+    # is already spent.
+    r = gate(STEP_RUNNERS, primary=f"anthropic/{PRIMARY_BARE_KEY}",
+             model="gpt-5-codex")
+    assert r.returncode != 0
+    assert "openai naming" in r.stderr
+
+
+def test_the_fallback_model_is_checked_against_the_fallback_key(gate):
+    r = gate(STEP_RUNNERS, primary=f"anthropic/{PRIMARY_BARE_KEY}",
+             fallback=f"openai/{FALLBACK_BARE_KEY}",
+             model="sonnet", fb_model="haiku-4-5")
+    assert r.returncode != 0
+    assert "audit-fallback-model" in r.stderr
+    assert "anthropic naming" in r.stderr
+
+
+def test_a_model_outside_every_known_family_passes_the_family_check(gate):
+    # A name matching no registry family is a new family, not a proven
+    # mismatch; the live catalog pre-flight is the layer that judges it.
+    r = gate(STEP_RUNNERS, primary=f"anthropic/{PRIMARY_BARE_KEY}",
+             model="frontier-9000")
+    assert r.returncode == 0, r.stderr
+
+
+def test_each_audit_key_is_preflighted_through_keycall(gate):
+    r = gate(STEP_RUNNERS, primary=f"anthropic/{PRIMARY_BARE_KEY}",
+             fallback=f"openai/{FALLBACK_BARE_KEY}",
+             model="sonnet", fb_model="gpt-test")
+    assert r.returncode == 0, r.stderr
+    argv = (gate.work / "keycall-argv.txt").read_text()
+    assert argv.count("verify") == 2
+    assert "anthropic" in argv and "openai" in argv
+    assert PRIMARY_BARE_KEY not in argv, "the key travels by env var, never argv"
+
+
+def test_a_key_the_provider_rejects_fails_before_any_attempt(gate):
+    _write_stub(
+        gate.bin_dir,
+        "keycall",
+        'echo "x stub keycall: key rejected by provider" >&2\n'
+        "exit 1\n",
+    )
+    r = gate(STEP_RUNNERS, primary=f"anthropic/{PRIMARY_BARE_KEY}")
+    assert r.returncode != 0
+    assert "failed live verification" in r.stderr
+    assert "key rejected by provider" in r.stderr
 
 
 def test_missing_key_skips_with_a_warning_instead_of_failing(gate):

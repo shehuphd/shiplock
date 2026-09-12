@@ -3,6 +3,27 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
+## [0.6.0] - 2026-09-12
+
+### Added
+- The gate refuses a model named in one provider's naming against another
+  provider's key, at configuration time. The adapter registry now carries
+  each provider's model-name families (`sonnet*` and `claude*` are
+  anthropic, `gpt*` and `codex*` are openai, `gemini*` is google), and
+  `audit-model` or `audit-fallback-model` matching a family other than its
+  key's fails with a message naming both and pointing at `keycall verify`
+  for the key's own catalog. A live consumer misconfiguration motivated
+  this: an anthropic-named model moved to the fallback slot when an openai
+  key took the primary, and the openai slot was then hand-filled with a
+  guessed name that 404ed on every run, invisibly, because the failover
+  absorbed it.
+- Each audit key is verified against its live provider through keycall
+  before any attempt is spent, in the same step that resolves providers. A
+  rejected key fails the gate with keycall's own sanitized line instead of
+  burning an audit attempt to discover the same thing; a missing keycall
+  binary downgrades the check to a warning so offline runs of the step
+  still work. The key reaches keycall by environment variable, never argv.
+
 ## [0.5.0] - 2026-09-10
 
 ### Added

@@ -40,7 +40,10 @@ on:
           Model for the audit run, in the key's provider's own naming. Required
           when run-audit is true: the provider comes from AUDIT_API_KEY, and
           model names don't carry across providers, so the gate never defaults
-          this.
+          this. Pick it from the key's own catalog ('keycall verify
+          --provider <p> --source env:VAR' lists what the key can reach)
+          rather than from memory; the gate refuses a name from another
+          provider's naming at configuration time.
         type: string
         default: ""
       audit-fallback-model:
@@ -145,8 +148,9 @@ jobs:
           # rates prices each attempt's tokens from its own bundled snapshot
           # (offline; no network call), so the cost column works the same way
           # for every provider instead of relying on a CLI's self-reported
-          # estimate that only some runners provide.
-          python -m pip install rates
+          # estimate that only some runners provide. keycall verifies each
+          # audit key against its live provider before an attempt is spent.
+          python -m pip install rates keycall
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
@@ -158,16 +162,19 @@ jobs:
         run: |
           set -euo pipefail
           # Adapter registry: one line per provider the gate can run, as
-          # "provider|cli|npm-install-spec". The provider is the prefix on a
-          # provider/key secret; the cli is its agent binary; the spec installs
-          # that binary. This table is the only place the provider set lives:
-          # the provider list in error messages, the runner lookup, and the
-          # installer all read it, so nothing downstream names a vendor or
+          # "provider|cli|npm-install-spec|model-name-families". The provider
+          # is the prefix on a provider/key secret; the cli is its agent
+          # binary; the spec installs that binary; the families are the glob
+          # shapes of that provider's model names, used to refuse a model
+          # named in one provider's naming against another provider's key.
+          # This table is the only place the provider set lives: the provider
+          # list in error messages, the runner lookup, the installer, and the
+          # family check all read it, so nothing downstream names a vendor or
           # assumes how many there are. Adding a provider is one line here plus
           # its invocation block in the audit step's run_attempt.
-          ADAPTERS='anthropic|claude|@anthropic-ai/claude-code
-          openai|codex|@openai/codex
-          google|gemini|@google/gemini-cli'
+          ADAPTERS='anthropic|claude|@anthropic-ai/claude-code|claude*,sonnet*,opus*,haiku*
+          openai|codex|@openai/codex|gpt*,o[0-9]*,codex*,chatgpt*
+          google|gemini|@google/gemini-cli|gemini*'
           field() {  # $1 provider, $2 column → prints the cell; nonzero if unknown
             printf '%s\n' "$ADAPTERS" | awk -F'|' -v p="$1" -v c="$2" \
               '$1 == p { print $c; hit = 1 } END { exit !hit }'
@@ -186,6 +193,24 @@ jobs:
           }
           runner_of()   { field "$1" 2; }  # provider → the agent CLI
           npm_spec_of() { field "$1" 3; }  # provider → its npm install spec
+          # Model names are per provider, and the audit's provider comes from
+          # the key, so a model in one provider's naming against another
+          # provider's key can never run; without this check it surfaces as a
+          # run-time 404, retried five times, after an attempt was spent.
+          require_family() {  # $1 input name, $2 model, $3 the key's provider
+            while IFS='|' read -r prov _cli _npm fams; do
+              [ -n "$prov" ] || continue
+              [ "$prov" = "$3" ] && continue
+              IFS=',' read -ra pats <<<"$fams"
+              for pat in "${pats[@]}"; do
+                case "$2" in
+                  $pat)
+                    echo "::error::$1 '$2' is $prov naming, but the key it runs under is $3; name a model from the $3 catalog: 'keycall verify --provider $3' lists what the key can reach" >&2
+                    exit 1;;
+                esac
+              done
+            done <<< "$ADAPTERS"
+          }
           require() {  # $1 secret name, $2 secret value → prints provider
             provider="$(provider_of "$2")"
             if [ -z "$provider" ]; then
@@ -211,6 +236,7 @@ jobs:
             exit 1
           fi
           primary_provider="$(require AUDIT_API_KEY "$PRIMARY_KEY")"
+          require_family audit-model "${{ inputs.audit-model }}" "$primary_provider"
           primary_runner="$(runner_of "$primary_provider")"
           install_provider "$primary_provider"
           fallback_provider=""
@@ -227,6 +253,28 @@ jobs:
                 exit 1
               fi
             fi
+            if [ -n "${{ inputs.audit-fallback-model }}" ]; then
+              require_family audit-fallback-model "${{ inputs.audit-fallback-model }}" "$fallback_provider"
+            fi
+          fi
+          # A dead key spends a full audit attempt to announce itself, so
+          # each key is verified against its live provider first. keycall's
+          # own output never carries the key. When keycall is not on PATH
+          # (an offline run of this step), the check is skipped with a
+          # warning rather than failed.
+          preflight() {  # $1 secret name, $2 provider, $3 the bare key
+            if ! command -v keycall >/dev/null 2>&1; then
+              echo "::warning::keycall is not installed, so $1 was not verified up front; a dead key will only surface by spending an audit attempt" >&2
+              return 0
+            fi
+            if ! KEYCALL_PREFLIGHT_KEY="$3" keycall verify --provider "$2" --source env:KEYCALL_PREFLIGHT_KEY; then
+              echo "::error::$1 failed live verification against $2 (keycall's line above says why); fix the key rather than spending an audit attempt on it" >&2
+              exit 1
+            fi
+          }
+          preflight AUDIT_API_KEY "$primary_provider" "${PRIMARY_KEY#*/}"
+          if [ -n "${FALLBACK_KEY:-}" ]; then
+            preflight AUDIT_FALLBACK_API_KEY "${fallback_provider:-$primary_provider}" "${FALLBACK_KEY#*/}"
           fi
           {
             echo "primary-provider=$primary_provider"
