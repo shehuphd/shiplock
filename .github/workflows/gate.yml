@@ -7,7 +7,6 @@ name: shiplock gate
 #       uses: shehuphd/shiplock/.github/workflows/gate.yml@main
 #       with:
 #         shiplock-spec: "shiplock"   # "." for shiplock's own repo
-#         audit-model: "sonnet"       # in your provider's own naming
 #       secrets:
 #         AUDIT_API_KEY: ${{ secrets.YOUR_AUDIT_KEY }}
 #
@@ -16,9 +15,10 @@ name: shiplock gate
 #
 # Both audit secrets are provider-prefixed strings: "provider/key", e.g.
 # "anthropic/sk-ant-..." or "openai/sk-...". The gate reads the provider from
-# the prefix (case-insensitive) and hands the key (case-sensitive, everything
-# after the first slash) to that provider's agent CLI. Supporting a new
-# provider is a code change here; the shape of the secrets never moves.
+# the prefix (case-insensitive), picks the model from that key's own live
+# catalog unless the caller pins one, and hands the key (case-sensitive,
+# everything after the first slash) to that provider's agent CLI. Supporting
+# a new provider is a code change here; the shape of the secrets never moves.
 
 on:
   workflow_call:
@@ -37,20 +37,21 @@ on:
         default: true
       audit-model:
         description: >-
-          Model for the audit run, in the key's provider's own naming. Required
-          when run-audit is true: the provider comes from AUDIT_API_KEY, and
-          model names don't carry across providers, so the gate never defaults
-          this. Pick it from the key's own catalog ('keycall verify
-          --provider <p> --source env:VAR' lists what the key can reach)
-          rather than from memory; the gate refuses a name from another
-          provider's naming at configuration time.
+          Model for the audit run, in the key's provider's own naming. Empty
+          routes from the key itself: keycall verifies AUDIT_API_KEY with one
+          bounded live generation and the model that answered runs the audit,
+          so the same caller works whichever provider the key names. Pin a
+          model only when you want a specific one; the gate refuses a name
+          from another provider's naming at configuration time, since model
+          names don't carry across providers.
         type: string
         default: ""
       audit-fallback-model:
         description: >-
           Model for the fallback attempt, in the fallback key's provider's
-          naming. Empty reuses audit-model when both keys name the same
-          provider; a cross-provider fallback must declare its own.
+          naming. Empty reuses the resolved audit model when both keys name
+          the same provider, and is picked from the fallback key's own live
+          catalog when the providers differ.
         type: string
         default: ""
       audit-permission-mode:
@@ -172,7 +173,7 @@ jobs:
           # family check all read it, so nothing downstream names a vendor or
           # assumes how many there are. Adding a provider is one line here plus
           # its invocation block in the audit step's run_attempt.
-          ADAPTERS='anthropic|claude|@anthropic-ai/claude-code|claude*,sonnet*,opus*,haiku*
+          ADAPTERS='anthropic|claude|@anthropic-ai/claude-code|claude*,sonnet*,opus*,haiku*,fable*
           openai|codex|@openai/codex|gpt*,o[0-9]*,codex*,chatgpt*
           google|gemini|@google/gemini-cli|gemini*'
           field() {  # $1 provider, $2 column → prints the cell; nonzero if unknown
@@ -231,14 +232,12 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [ -z "${{ inputs.audit-model }}" ]; then
-            echo "::error::declare audit-model in your key's provider's own model naming; the gate can't default it because the provider comes from AUDIT_API_KEY" >&2
-            exit 1
-          fi
           primary_provider="$(require AUDIT_API_KEY "$PRIMARY_KEY")"
-          require_family audit-model "${{ inputs.audit-model }}" "$primary_provider"
           primary_runner="$(runner_of "$primary_provider")"
           install_provider "$primary_provider"
+          if [ -n "${{ inputs.audit-model }}" ]; then
+            require_family audit-model "${{ inputs.audit-model }}" "$primary_provider"
+          fi
           fallback_provider=""
           fallback_runner=""
           if [ -n "${FALLBACK_KEY:-}" ]; then
@@ -246,12 +245,6 @@ jobs:
             fallback_runner="$(runner_of "$fallback_provider")"
             if [ "$fallback_provider" != "$primary_provider" ]; then
               install_provider "$fallback_provider"
-              # A cross-provider fallback can't inherit the primary's model
-              # name: model naming is per provider. Fail here, not mid-failover.
-              if [ -z "${{ inputs.audit-fallback-model }}" ]; then
-                echo "::error::the fallback key's provider ($fallback_provider) differs from the primary's ($primary_provider), so audit-fallback-model must name a model in $fallback_provider's own naming" >&2
-                exit 1
-              fi
             fi
             if [ -n "${{ inputs.audit-fallback-model }}" ]; then
               require_family audit-fallback-model "${{ inputs.audit-fallback-model }}" "$fallback_provider"
@@ -272,15 +265,63 @@ jobs:
               exit 1
             fi
           }
-          preflight AUDIT_API_KEY "$primary_provider" "${PRIMARY_KEY#*/}"
+          # An empty model input routes from the key itself: keycall walks
+          # the key's live catalog in its own candidate order, makes one
+          # bounded generation, and the model that answered runs the audit.
+          # No caller ever writes a model name for a key it hasn't listed,
+          # and the key slots stop caring which provider they hold. The
+          # pick subsumes the preflight (the model just answered on this
+          # key), and it can't be skipped the way the preflight can: with
+          # no pinned model and no keycall there is nothing to run. The
+          # "generated with" phrase is keycall's own verify line; a keycall
+          # release that rewords it fails here loudly, never silently.
+          pick_model() {  # $1 secret name, $2 provider, $3 the bare key → prints the model
+            if ! command -v keycall >/dev/null 2>&1; then
+              echo "::error::$1 names no model and keycall is not installed to pick one from the $2 catalog; install keycall or set the model input" >&2
+              exit 1
+            fi
+            local out model
+            if ! out="$(KEYCALL_PREFLIGHT_KEY="$3" keycall verify --generate --provider "$2" --source env:KEYCALL_PREFLIGHT_KEY)"; then
+              printf '%s\n' "$out" >&2
+              echo "::error::$1 failed live verification against $2 (keycall's lines above say why); fix the key rather than spending an audit attempt on it" >&2
+              exit 1
+            fi
+            printf '%s\n' "$out" >&2
+            model="$(printf '%s\n' "$out" | sed -n 's/.*generated with \([^ ]*\) .*/\1/p' | head -n 1)"
+            if [ -z "$model" ]; then
+              echo "::error::$1 verified against $2 but no advertised model answered a generation; pin the model input or check the key's model access" >&2
+              exit 1
+            fi
+            printf '%s' "$model"
+          }
+          primary_model="${{ inputs.audit-model }}"
+          if [ -n "$primary_model" ]; then
+            preflight AUDIT_API_KEY "$primary_provider" "${PRIMARY_KEY#*/}"
+          else
+            primary_model="$(pick_model AUDIT_API_KEY "$primary_provider" "${PRIMARY_KEY#*/}")"
+            echo "audit-model is empty; the $primary_provider key's catalog answered with $primary_model" >&2
+          fi
+          fallback_model=""
           if [ -n "${FALLBACK_KEY:-}" ]; then
-            preflight AUDIT_FALLBACK_API_KEY "${fallback_provider:-$primary_provider}" "${FALLBACK_KEY#*/}"
+            fallback_model="${{ inputs.audit-fallback-model }}"
+            if [ -n "$fallback_model" ] || [ "$fallback_provider" = "$primary_provider" ]; then
+              # A same-provider fallback with no model of its own reuses the
+              # resolved primary model; either way the key still gets its
+              # own preflight.
+              fallback_model="${fallback_model:-$primary_model}"
+              preflight AUDIT_FALLBACK_API_KEY "$fallback_provider" "${FALLBACK_KEY#*/}"
+            else
+              fallback_model="$(pick_model AUDIT_FALLBACK_API_KEY "$fallback_provider" "${FALLBACK_KEY#*/}")"
+              echo "audit-fallback-model is empty; the $fallback_provider key's catalog answered with $fallback_model" >&2
+            fi
           fi
           {
             echo "primary-provider=$primary_provider"
             echo "primary-runner=$primary_runner"
+            echo "primary-model=$primary_model"
             echo "fallback-provider=$fallback_provider"
             echo "fallback-runner=$fallback_runner"
+            echo "fallback-model=$fallback_model"
           } >> "$GITHUB_OUTPUT"
       - name: Run the semantic audit
         id: audit
@@ -457,7 +498,7 @@ jobs:
             esac
           }
           rc=0
-          run_attempt "${{ steps.runners.outputs.primary-runner }}" "${{ inputs.audit-model }}" \
+          run_attempt "${{ steps.runners.outputs.primary-runner }}" "${{ steps.runners.outputs.primary-model }}" \
             "$(key_of "$PRIMARY_KEY")" audit-prompt.md audit.json || rc=$?
           if [ "$rc" -ne 0 ] && [ -n "${{ steps.runners.outputs.fallback-runner }}" ]; then
             echo "first attempt (${{ steps.runners.outputs.primary-provider }}) exited $rc; continuing on ${{ steps.runners.outputs.fallback-provider }}" >&2
@@ -477,9 +518,8 @@ jobs:
               echo ""
               cat audit-prompt.md
             } > audit-resume-prompt.md
-            fb_model="${{ inputs.audit-fallback-model }}"
             rc=0
-            run_attempt "${{ steps.runners.outputs.fallback-runner }}" "${fb_model:-${{ inputs.audit-model }}}" \
+            run_attempt "${{ steps.runners.outputs.fallback-runner }}" "${{ steps.runners.outputs.fallback-model }}" \
               "$(key_of "$FALLBACK_KEY")" audit-resume-prompt.md audit.json || rc=$?
           fi
           exit "$rc"
@@ -554,10 +594,9 @@ jobs:
           print(_result)
           ' "$1" "$2" "$3" 2>/dev/null || echo "n/a"
           }
-          # The fallback model mirrors run_attempt's own default: an unset
-          # audit-fallback-model reuses audit-model, same-provider only.
-          fb_model="${{ inputs.audit-fallback-model }}"
-          fb_model="${fb_model:-${{ inputs.audit-model }}}"
+          # Models arrive resolved from the runners step, so the table names
+          # what ran, a catalog-picked model included.
+          fb_model="${{ steps.runners.outputs.fallback-model }}"
           table_row() {  # $1 json-file $2 label $3 provider $4 model
             echo "| $2 | $(usage_row "$1" '.usage.input_tokens') | $(usage_row "$1" '.usage.output_tokens') | $(usage_row "$1" '.usage.cache_read_input_tokens') | $(usage_row "$1" '.usage.cache_creation_input_tokens') | $(rates_cost "$1" "$3" "$4") |"
           }
@@ -567,10 +606,10 @@ jobs:
             echo "| Attempt | Input | Output | Cache read | Cache write | Cost (USD, via rates) |"
             echo "|---|---|---|---|---|---|"
             if [ -e audit-first.json ]; then
-              table_row audit-first.json "1 (interrupted, ${{ steps.runners.outputs.primary-provider }})" "${{ steps.runners.outputs.primary-provider }}" "${{ inputs.audit-model }}"
+              table_row audit-first.json "1 (interrupted, ${{ steps.runners.outputs.primary-provider }})" "${{ steps.runners.outputs.primary-provider }}" "${{ steps.runners.outputs.primary-model }}"
               table_row audit.json "2 (continued, ${{ steps.runners.outputs.fallback-provider }})" "${{ steps.runners.outputs.fallback-provider }}" "$fb_model"
             else
-              table_row audit.json "1 (${{ steps.runners.outputs.primary-provider }})" "${{ steps.runners.outputs.primary-provider }}" "${{ inputs.audit-model }}"
+              table_row audit.json "1 (${{ steps.runners.outputs.primary-provider }})" "${{ steps.runners.outputs.primary-provider }}" "${{ steps.runners.outputs.primary-model }}"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           in_tok="$(usage_row audit.json '.usage.input_tokens')"
@@ -580,7 +619,7 @@ jobs:
           if [ -e audit-first.json ]; then
             cost="$(rates_cost audit.json "${{ steps.runners.outputs.fallback-provider }}" "$fb_model")"
           else
-            cost="$(rates_cost audit.json "${{ steps.runners.outputs.primary-provider }}" "${{ inputs.audit-model }}")"
+            cost="$(rates_cost audit.json "${{ steps.runners.outputs.primary-provider }}" "${{ steps.runners.outputs.primary-model }}")"
           fi
           usage_line="Audit usage: $in_tok in / $out_tok out (cache: $cache_r read, $cache_w written); cost: $cost USD."
           if [ -e audit-first.json ]; then

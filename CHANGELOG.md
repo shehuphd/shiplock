@@ -23,6 +23,15 @@ semantic versioning.
   burning an audit attempt to discover the same thing; a missing keycall
   binary downgrades the check to a warning so offline runs of the step
   still work. The key reaches keycall by environment variable, never argv.
+- An empty `audit-model` now routes from the key itself instead of failing:
+  keycall walks the key's live catalog in its own candidate order, makes one
+  bounded generation, and the model that answered runs the audit. The same
+  applies to an empty `audit-fallback-model` on a cross-provider fallback,
+  which previously refused to start. The key slots are provider-agnostic as
+  a result: a caller that pins no models can swap either secret to a key
+  from any supported provider and the gate still routes to a model that key
+  can reach. Resolved models flow to the audit and the usage table through
+  step outputs, so the job summary names what ran, picked or pinned.
 
 ## [0.5.0] - 2026-09-10
 

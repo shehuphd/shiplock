@@ -251,21 +251,91 @@ def test_unknown_provider_is_rejected_naming_the_known_ones(gate):
         assert provider in result.stderr
 
 
-def test_missing_model_is_rejected(gate):
+def _picking_keycall_stub(bin_dir: Path, model_by_provider: dict[str, str]) -> None:
+    """A keycall stub whose --generate verify answers with a per-provider
+    model, the way the live CLI reports the catalog candidate that
+    generated."""
+    cases = "\n".join(
+        f'  {provider}) echo "ok env:KEYCALL_PREFLIGHT_KEY: generated with {model} '
+        f'(filtered position 0, provider-list position 0, 812 ms, total tokens: 42)";;'
+        for provider, model in model_by_provider.items()
+    )
+    _write_stub(
+        bin_dir,
+        "keycall",
+        'printf "%s\\n" "$@" >> keycall-argv.txt\n'
+        'provider=""\n'
+        'args=("$@")\n'
+        'for ((i = 0; i < ${#args[@]}; i++)); do\n'
+        '  [ "${args[$i]}" = "--provider" ] && provider="${args[$((i + 1))]}"\n'
+        "done\n"
+        'case " $* " in *" --generate "*) ;; *) echo "stub keycall: key accepted"; exit 0;; esac\n'
+        f'case "$provider" in\n{cases}\n'
+        '  *) echo "stub keycall: key accepted";;\n'
+        "esac\n",
+    )
+
+
+def test_an_empty_model_is_picked_from_the_keys_own_catalog(gate):
+    # The provider comes from the key, and with no model pinned the gate
+    # routes to whatever the key's live catalog answered with, so the key
+    # slot can hold any provider without the caller naming a model.
+    _picking_keycall_stub(gate.bin_dir, {"anthropic": "claude-sonnet-4-5"})
     result = gate(STEP_RUNNERS, primary=f"anthropic/{PRIMARY_BARE_KEY}", model="")
-    assert result.returncode != 0
-    assert "audit-model" in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert "primary-model=claude-sonnet-4-5" in gate.output_file.read_text()
+    argv = (gate.work / "keycall-argv.txt").read_text()
+    assert "--generate" in argv, "the pick verifies with a live generation"
+    assert PRIMARY_BARE_KEY not in argv, "the key goes by env var, never argv"
 
 
-def test_cross_provider_fallback_requires_its_own_model(gate):
+def test_a_cross_provider_fallback_without_a_model_picks_from_its_own_key(gate):
+    _picking_keycall_stub(
+        gate.bin_dir, {"anthropic": "claude-sonnet-4-5", "openai": "gpt-5.1"}
+    )
     result = gate(
         STEP_RUNNERS,
         primary=f"anthropic/{PRIMARY_BARE_KEY}",
         fallback=f"openai/{FALLBACK_BARE_KEY}",
+        model="",
         fb_model="",
     )
+    assert result.returncode == 0, result.stderr
+    outputs = gate.output_file.read_text()
+    assert "primary-model=claude-sonnet-4-5" in outputs
+    assert "fallback-model=gpt-5.1" in outputs
+
+
+def test_a_same_provider_fallback_reuses_the_picked_model(gate):
+    _picking_keycall_stub(gate.bin_dir, {"anthropic": "claude-sonnet-4-5"})
+    result = gate(
+        STEP_RUNNERS,
+        primary=f"anthropic/{PRIMARY_BARE_KEY}",
+        fallback=f"anthropic/{FALLBACK_BARE_KEY}",
+        model="",
+        fb_model="",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "fallback-model=claude-sonnet-4-5" in gate.output_file.read_text()
+    argv = (gate.work / "keycall-argv.txt").read_text()
+    assert argv.count("verify") == 2, "the fallback key still gets its own check"
+
+
+def test_a_pick_with_no_answering_model_is_rejected(gate):
+    # The default stub accepts the key but reports no generation, the shape
+    # of a key whose catalog answered with nothing; the gate must refuse to
+    # run rather than guess a model for it.
+    result = gate(STEP_RUNNERS, primary=f"anthropic/{PRIMARY_BARE_KEY}", model="")
     assert result.returncode != 0
-    assert "audit-fallback-model" in result.stderr
+    assert "no advertised model answered" in result.stderr
+
+
+def test_a_pinned_model_reaches_the_outputs_unchanged(gate):
+    result = gate(STEP_RUNNERS, primary=f"anthropic/{PRIMARY_BARE_KEY}", model="opus")
+    assert result.returncode == 0, result.stderr
+    assert "primary-model=opus" in gate.output_file.read_text()
+    argv = (gate.work / "keycall-argv.txt").read_text()
+    assert "--generate" not in argv, "a pinned model needs no selection call"
 
 
 def test_malformed_fallback_key_is_rejected_up_front(gate):

@@ -290,15 +290,15 @@ jobs:
     uses: shehuphd/shiplock/.github/workflows/gate.yml@main
     with:
       shiplock-spec: "shiplock"   # the pip requirement for shiplock itself
-      audit-model: "sonnet"       # in your key's provider's own naming
     secrets:
       # "provider/key" — the prefix tells the gate which agent CLI to run
       AUDIT_API_KEY: ${{ secrets.YOUR_AUDIT_KEY }}
 ```
 
 The `check` job runs the deterministic checks on every push and pull request.
-The `audit` job reads the provider from the key, runs the semantic layer
-through that provider's agent CLI, and
+The `audit` job reads the provider from the key, picks the audit's model from
+that key's own live catalog (see `audit-model` below for pinning one instead),
+runs the semantic layer through that provider's agent CLI, and
 opens an issue if the audit returns `AUDIT: FAIL` (or produces no verdict line,
 which fails closed). Each audit's token usage — input, output, cache traffic,
 and a cost in USD priced by [rates](https://pypi.org/project/rates/) from the
@@ -315,8 +315,8 @@ The workflow's inputs:
 | `python-version` | `"3.12"` | The Python the checks run on. |
 | `shiplock-spec` | `"shiplock"` | The pip requirement for shiplock itself (`"."` in shiplock's own repo). |
 | `run-audit` | `true` | Whether the semantic audit job runs at all. |
-| `audit-model` | `""` | The audit's model, in the key's provider's own naming. Required when `run-audit` is true. |
-| `audit-fallback-model` | `""` | The fallback attempt's model, in the fallback key's provider's naming. Empty reuses `audit-model` when both keys name the same provider; a cross-provider fallback must declare its own. |
+| `audit-model` | `""` | The audit's model, in the key's provider's own naming. Empty picks from the key's own live catalog: keycall verifies the key with one bounded generation and the model that answered runs the audit. |
+| `audit-fallback-model` | `""` | The fallback attempt's model, in the fallback key's provider's naming. Empty reuses the resolved audit model when both keys name the same provider, and is picked from the fallback key's own catalog when the providers differ. |
 | `audit-permission-mode` | `"dontAsk"` | The Claude Code permission mode for the audit run (`anthropic` keys only). |
 | `audit-effort` | `"high"` | Reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`). An `anthropic` key maps it to Claude Code's `--effort`; a `google` key maps it to Gemini's `thinkingLevel` (`low`, `medium`, `high`, with `xhigh`/`max` clamped; `medium` is gemini-3.1-pro only, and Gemini 3 defaults to high). An `openai` key maps it to Codex's `model_reasoning_effort`. Lower it to cut cost when a blocked release is all you need from a failed audit; raise it if audits miss drift your own review would have caught. |
 
@@ -372,8 +372,16 @@ for Gemini: without a write tool it can't keep a progress log, so a Gemini
 primary that dies mid-run restarts on the fallback rather than continuing, where
 Claude and Codex continue.
 
-Because the provider names the model namespace, `audit-model` has no default:
-declare it in your provider's own naming. The `check` job needs no key.
+Because the provider names the model namespace, `audit-model` has no fixed
+default. Left empty, the gate routes from the key itself: keycall walks the
+key's live catalog in its own candidate order, makes one bounded generation,
+and the model that answered runs the audit. That keeps the key slots
+provider-agnostic (swap in a key from any supported provider and the gate
+still runs) and means no one ever writes a model name for a key whose catalog
+they haven't listed. Pin `audit-model` when you want a specific model; declare
+it in your key's provider's own naming, and the gate refuses a name from
+another provider's naming before any call is made. The `check` job needs no
+key.
 
 Pick the cheapest model among reasoning equals. The audit has to end with a
 greppable `AUDIT: PASS` or `AUDIT: FAIL` line, and a run with no verdict line
@@ -415,13 +423,13 @@ primary — credit exhaustion is an account-level event, so a sibling key from t
 same account is just as empty as the one that failed:
 
 ```yaml
-    with:
-      audit-model: "sonnet"
-      audit-fallback-model: "<a model in the fallback provider's naming>"
     secrets:
       AUDIT_API_KEY: ${{ secrets.MY_ANTHROPIC_AUDIT_KEY }}    # anthropic/sk-ant-...
       AUDIT_FALLBACK_API_KEY: ${{ secrets.MY_OPENAI_AUDIT_KEY }}  # openai/sk-...
 ```
+
+Each key's model is picked from its own catalog unless pinned, so a
+cross-provider fallback needs no `audit-fallback-model` of its own.
 
 With no fallback configured, a failed first attempt fails the job, and a re-run
 starts the audit from scratch.
