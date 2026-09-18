@@ -23,6 +23,7 @@ from shiplock._config import (
 )
 from shiplock._introspect import IntrospectError, introspect
 from shiplock._report import Finding, Notice
+from shiplock._scan import build_ref_patterns, run_scan
 
 CheckResult = tuple[list[Finding], list[Notice]]
 
@@ -130,13 +131,15 @@ def check_internal_refs(config: Config) -> CheckResult:
     if config.docs is None or not config.docs.public:
         return [], [Notice(name, "no [docs].public declared; skipped")]
 
+    extra = config.scan.extra_refs if config.scan else []
+    patterns = build_ref_patterns(extra)
     findings: list[Finding] = []
     for rel in config.docs.public:
         text = _read_text(config.root / rel)
         if text is None:
             continue
         for i, line in enumerate(text.splitlines(), start=1):
-            for label, pattern in _INTERNAL_REF_PATTERNS:
+            for label, pattern in patterns:
                 if pattern.search(line):
                     findings.append(
                         Finding(
@@ -177,6 +180,19 @@ def check_readme_links(config: Config) -> CheckResult:
                     )
                 )
     return findings, []
+
+
+def check_scan(config: Config) -> CheckResult:
+    """Scan the git-tracked set for internal references and identity leaks.
+
+    Opt-in: a repo with no ``[scan]`` section skips with a notice, so an
+    existing gate doesn't gain a new failing check on upgrade. The ``shiplock
+    scan`` subcommand runs the scan directly with a default config when none is
+    declared.
+    """
+    if config.scan is None:
+        return [], [Notice("scan", "no [scan] declared; skipped")]
+    return run_scan(config, config.scan)
 
 
 def check_version(config: Config) -> CheckResult:
@@ -604,21 +620,6 @@ def _changelog_covers(text: str, version: str) -> bool:
     return False
 
 
-# The lookbehinds keep each pattern matching the internal artifact and not a
-# lookalike: "pypi.org/project/" is a public URL, "encoding.md" isn't the
-# coding-standards file, and "platform.claude.com" is a domain, not the .claude
-# assistant directory.
-_INTERNAL_REF_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("project/", re.compile(r"(?<!pypi\.org/)\bproject/")),
-    ("CODING.md", re.compile(r"(?<!\w)CODING\.md", re.IGNORECASE)),
-    ("ROADMAP", re.compile(r"ROADMAP")),
-    (".claude", re.compile(r"(?<![\w.])\.claude\b")),
-    (".codex", re.compile(r"(?<![\w.])\.codex\b")),
-    (".grok", re.compile(r"(?<![\w.])\.grok\b")),
-    (".cursor", re.compile(r"(?<![\w.])\.cursor\b")),
-)
-
-
 _MD_LINK = re.compile(r"!?\[[^\]]*\]\((?P<target>[^)]*)\)")
 
 
@@ -1019,6 +1020,7 @@ _CHECKS = (
     check_banned_words,
     check_internal_refs,
     check_readme_links,
+    check_scan,
     check_version,
     check_architecture,
     check_coverage,

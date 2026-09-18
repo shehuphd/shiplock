@@ -13,6 +13,7 @@ A malformed config raises ``ConfigError``, which the CLI turns into exit code 2
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -103,6 +104,29 @@ class TestsConfig:
 
 
 @dataclass(frozen=True)
+class RefPattern:
+    # A caller-supplied internal-reference pattern: ``label`` names what a hit
+    # means, ``pattern`` is the regex. Consumed by both ``internal-refs`` and
+    # ``scan``, so the extendable pattern set is declared once.
+    label: str
+    pattern: str
+
+
+@dataclass(frozen=True)
+class ScanConfig:
+    # The leak & internal-reference scan over the git-tracked set. ``blocklist``
+    # names the local, gitignored TOML files holding the sensitive inputs
+    # (code-names, home usernames, personal emails); their location is the
+    # caller's to set, never baked into shiplock. ``extra_refs`` extends the
+    # house internal-ref patterns. ``secrets`` opts into generic secret-pattern
+    # detection (off by default). ``exclude`` globs skip tracked files.
+    blocklist: list[str] = field(default_factory=list)
+    extra_refs: list[RefPattern] = field(default_factory=list)
+    secrets: bool = False
+    exclude: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class Config:
     """A repo's fully-parsed shiplock config, rooted at ``root``."""
 
@@ -116,6 +140,7 @@ class Config:
     versioned_files: list[VersionedFile] = field(default_factory=list)
     deps: DepsConfig | None = None
     tests: TestsConfig | None = None
+    scan: ScanConfig | None = None
 
 
 _DEFAULT_DOC_NAMES = (
@@ -185,6 +210,7 @@ def _parse(root: Path, raw: dict) -> Config:
         "versioned_files",
         "deps",
         "tests",
+        "scan",
     }
     unknown = set(raw) - known
     if unknown:
@@ -205,6 +231,7 @@ def _parse(root: Path, raw: dict) -> Config:
         versioned_files=_parse_versioned_files(raw.get("versioned_files")),
         deps=_parse_deps(raw.get("deps")),
         tests=_parse_tests(raw.get("tests")),
+        scan=_parse_scan(raw.get("scan")),
     )
 
 
@@ -372,6 +399,53 @@ def _parse_tests(section: object) -> TestsConfig | None:
         globs=_require_str_list(section["globs"], "[tests].globs"),
         exempt=_require_str_list(section.get("exempt", []), "[tests].exempt"),
     )
+
+
+def _parse_scan(section: object) -> ScanConfig | None:
+    if section is None:
+        return None
+    _require_table(section, "[scan]")
+
+    raw_blocklist = section.get("blocklist", [])
+    if isinstance(raw_blocklist, str):
+        raw_blocklist = [raw_blocklist]
+    blocklist = _require_str_list(raw_blocklist, "[scan].blocklist")
+
+    secrets = section.get("secrets", False)
+    if not isinstance(secrets, bool):
+        raise ConfigError("[scan].secrets must be a boolean.")
+
+    extra_refs = _parse_extra_refs(section.get("extra_refs"))
+
+    return ScanConfig(
+        blocklist=blocklist,
+        extra_refs=extra_refs,
+        secrets=secrets,
+        exclude=_require_str_list(section.get("exclude", []), "[scan].exclude"),
+    )
+
+
+def _parse_extra_refs(section: object) -> list[RefPattern]:
+    if section is None:
+        return []
+    if not isinstance(section, list):
+        raise ConfigError("[scan].extra_refs must be an array of tables.")
+    entries: list[RefPattern] = []
+    for i, item in enumerate(section):
+        where = f"[scan].extra_refs entry {i}"
+        _require_table(item, where)
+        for key in ("label", "pattern"):
+            if key not in item:
+                raise ConfigError(f"{where} is missing required key '{key}'.")
+        pattern = _require_str(item["pattern"], f"{where}.pattern")
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ConfigError(f"{where}.pattern is not a valid regex: {exc}") from exc
+        entries.append(
+            RefPattern(label=_require_str(item["label"], f"{where}.label"), pattern=pattern)
+        )
+    return entries
 
 
 def _opt_str(value: object, where: str) -> str | None:

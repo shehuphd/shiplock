@@ -42,3 +42,10 @@ requirements = ["requirements*.txt", "tools/requirements*.txt"]
 
 [tests]
 globs = ["tests/**/*.py"]
+
+[scan]
+# Scan the git-tracked set for internal references and identity leaks. The
+# module defining the ref-patterns and the test fixtures name the internal
+# tokens on purpose, so they're carved out the way _style.py is carved out of
+# the banned-word sweep. shiplock ships no code-name blocklist.
+exclude = ["src/shiplock/_scan.py", "src/shiplock/_checks.py", "tests/**"]

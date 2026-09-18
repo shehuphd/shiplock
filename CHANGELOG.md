@@ -3,6 +3,34 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
+## [0.7.0] - 2026-09-18
+
+### Added
+- A leak & internal-reference scan, behind the `shiplock scan` command and an
+  opt-in `scan` check. Where `internal-refs` reads only the declared public
+  docs, `scan` reads the whole git-tracked set (`git ls-files`), so a leak in
+  a file the repo never declared, a test fixture, a README example, doesn't
+  reach a push. It flags the internal-reference patterns and, when a blocklist
+  is configured, three identity classes: project code-names, home paths, and
+  personal emails.
+- A local, gitignored blocklist holds the sensitive inputs (code-names, home
+  usernames, personal emails). Its path is set in `[scan].blocklist`, never
+  baked into shiplock, so the code-names live outside every repo's committed
+  source and outside shiplock's own. A blocklist that git tracks is refused as
+  a finding rather than loaded, turning that one mistake into a failed run.
+- Every scan finding names the file, the line, and the rule, and masks the
+  matched string to its first character, so a code-name never echoes into the
+  CI log the scan writes.
+- `[scan].extra_refs` extends the internal-reference patterns for both
+  `internal-refs` and `scan` from one place, and the house set gains the bug,
+  lessons, and test-log file names. `secrets = true` opts into generic
+  secret-pattern detection (off by default; a dedicated scanner such as
+  gitleaks covers secrets more thoroughly). `.gitignore` and `.gitattributes`
+  are never scanned, binary files are skipped, and `[scan].exclude` globs skip
+  more. The `scan` check runs only when `[scan]` is declared, so upgrading
+  never adds a failing check to a repo that hasn't opted in; `shiplock scan`
+  runs with the house patterns on any repo with no config.
+
 ## [0.6.0] - 2026-09-12
 
 ### Added

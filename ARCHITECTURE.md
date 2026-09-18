@@ -9,7 +9,7 @@ the full map of its structure, components, integrations, and testing.
 
 ### Shape
 
-Shiplock is a docs-vs-code release gate: eleven deterministic checks that run
+Shiplock is a docs-vs-code release gate: twelve deterministic checks that run
 the same way in a terminal, a test suite, and CI, plus two shipped agent
 prompts (the gating semantic audit and an advisory ablation report), all
 configured per repo by one `shiplock.toml`.
@@ -34,7 +34,7 @@ configured per repo by one `shiplock.toml`.
 #### Plain-English version
 
 A check run loads the repo's config, or builds the default one when no config
-file exists, then hands it to each of the eleven checks in a fixed order.
+file exists, then hands it to each of the twelve checks in a fixed order.
 Every check reads what it needs (files, git, or a subprocess import of the
 checked package), reports each disagreement as a finding and each skip as a
 notice, and the CLI prints findings to stdout, notices and the summary to
@@ -101,12 +101,13 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
 shiplock/
 ├── src/shiplock/
 │   ├── __init__.py       # public API re-exports and __version__
-│   ├── cli.py            # command-line entry point (check, prompt, needs-import)
+│   ├── cli.py            # command-line entry point (check, scan, prompt, needs-import)
 │   ├── _compat.py        # version-guarded imports (tomllib), defined once
 │   ├── _config.py        # shiplock.toml loader and typed config model
-│   ├── _checks.py        # the eleven checks and the runner
+│   ├── _checks.py        # the twelve checks and the runner
 │   ├── _report.py        # Finding, Notice, Report result types
 │   ├── _style.py         # the banned-word list and matcher
+│   ├── _scan.py          # the leak & internal-reference scan over tracked files
 │   ├── _introspect.py    # subprocess introspection bound to the checked root
 │   ├── py.typed          # PEP 561 marker
 │   └── prompts/
@@ -152,12 +153,13 @@ shiplock check
 
 | Module | Responsibility |
 |---|---|
-| `cli` | Parses arguments, dispatches `check`, `prompt`, and `needs-import`, renders the report, owns the exit-code contract. Greets a bare invocation, translates argparse errors into sentences with fuzzy command suggestions, and colors the finding/clean categories on a tty (`NO_COLOR` honored). |
+| `cli` | Parses arguments, dispatches `check`, `scan`, `prompt`, and `needs-import`, renders the report, owns the exit-code contract. Greets a bare invocation, translates argparse errors into sentences with fuzzy command suggestions, and colors the finding/clean categories on a tty (`NO_COLOR` honored). |
 | `_compat` | Version-guarded imports in one place: `tomllib` from the standard library on 3.11+, the `tomli` backport on 3.10. |
 | `_config` | Reads `shiplock.toml`, validates it, and returns a frozen `Config` of typed sections. Raises `ConfigError` on an unknown top-level section, a wrong-typed value, or a section missing a required field. |
-| `_checks` | Holds the eleven check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
+| `_checks` | Holds the twelve check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
 | `_report` | Defines `Finding` (a disagreement), `Notice` (a skip with a reason), and `Report` (both, plus `ok`). |
 | `_style` | Defines the house banned-word list and the word-boundary matcher. Carved out of shiplock's own sweep, since it has to name the words. |
+| `_scan` | Runs the leak & internal-reference scan over the git-tracked set: shared ref-patterns, a local gitignored blocklist for the identity classes, masked output, and an opt-in secret switch. |
 | `_introspect` | Reads a package's `__version__`, `__all__`, enum members, and callable signatures in a subprocess that binds `sys.path` to the checked root, so `version` and `coverage` never read a stale installed copy. |
 
 ## The check registry
@@ -167,8 +169,8 @@ and returning `(findings, notices)`. The order in that tuple is the order
 findings are reported in. Adding a check means adding a function and one tuple
 entry; nothing else in the runner changes.
 
-The eleven checks: `docs-exist`, `banned-words`, `internal-refs`,
-`readme-links`, `version`, `architecture`, `coverage`, `manifest`,
+The twelve checks: `docs-exist`, `banned-words`, `internal-refs`,
+`readme-links`, `scan`, `version`, `architecture`, `coverage`, `manifest`,
 `versioned-files`, `deps-declared-once`, `test-assertions`. Each is documented
 in [USAGE.md](USAGE.md).
 

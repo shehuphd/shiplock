@@ -65,14 +65,25 @@ Shiplock checks in two layers:
 
 1. **Deterministic checks** (`shiplock check`) — fast, exact, no model. Missing
    docs, banned words, internal references in public docs, absolute README
-   links, version alignment, the architecture module list, object coverage,
-   the per-file manifest, versioned-file markers, dependency declarations
-   duplicated between pyproject and requirements files, tests that carry no
-   assertion.
+   links, a leak scan of the git-tracked files, version alignment, the
+   architecture module list, object coverage, the per-file manifest,
+   versioned-file markers, dependency declarations duplicated between pyproject
+   and requirements files, tests that carry no assertion.
 2. **A semantic audit** (`shiplock prompt`) — the prompt for a fresh agent to
    read the code and hold every doc claim against it, from state rather than
    from what changed. Centrally versioned inside the package, so every repo gets
    prompt updates on the next install.
+
+The leak scan also runs on its own, as a git `pre-push` gate:
+
+```bash
+shiplock scan
+```
+
+It reads the git-tracked files, not only the declared docs, and flags internal
+references and, against a local gitignored blocklist you point it at, project
+code-names, home paths, and personal emails. Every match is masked in the
+output, so a code-name never echoes into a CI log.
 
 Print the audit prompt with:
 

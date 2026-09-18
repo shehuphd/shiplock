@@ -263,3 +263,52 @@ def test_needs_import_defaults_to_the_current_directory(
     code = main(["needs-import"])
     assert code == EXIT_OK
     assert capsys.readouterr().out.strip() == "false"
+
+
+# --- scan: the leak & internal-reference subcommand ------------------------
+
+
+def _init_git(root, write_file, relpath, text):
+    import subprocess
+
+    subprocess.run(["git", "init", str(root)], check=True, capture_output=True)
+    write_file(root, relpath, text)
+    subprocess.run(
+        ["git", "-C", str(root), "add", relpath], check=True, capture_output=True
+    )
+    return root
+
+
+def test_scan_finding_returns_exit_one(tmp_path, write_file, capsys):
+    _init_git(tmp_path, write_file, "notes.txt", "see project/ for the plan")
+    code = main(["scan", str(tmp_path)])
+    assert code == EXIT_FINDINGS
+    assert "internal reference to project/" in capsys.readouterr().out
+
+
+def test_scan_clean_returns_exit_zero(tmp_path, write_file):
+    _init_git(tmp_path, write_file, "notes.txt", "nothing internal here")
+    assert main(["scan", str(tmp_path)]) == EXIT_OK
+
+
+def test_scan_bad_path_is_usage_error(capsys):
+    code = main(["scan", "/no/such/dir"])
+    assert code == EXIT_USAGE
+    assert "isn't a directory it can scan" in capsys.readouterr().err
+
+
+def test_scan_json_emits_one_parseable_object(tmp_path, write_file, capsys):
+    _init_git(tmp_path, write_file, "notes.txt", "see project/ plan")
+    code = main(["scan", str(tmp_path), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == EXIT_FINDINGS
+    assert payload["ok"] is False
+    assert payload["findings"][0]["check"] == "scan"
+
+
+def test_scan_runs_without_a_config_file(tmp_path, write_file, capsys):
+    # No shiplock.toml: an explicit scan still runs the house ref-patterns.
+    _init_git(tmp_path, write_file, "notes.txt", "read CODING.md")
+    code = main(["scan", str(tmp_path)])
+    assert code == EXIT_FINDINGS
+    assert "internal reference to CODING.md" in capsys.readouterr().out

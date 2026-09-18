@@ -110,6 +110,7 @@ you want more coverage — nothing forces you to fill in the rest.
 | `[[versioned_files]]` | `versioned-files` — one entry per data file, repeatable | marker movement isn't checked |
 | `[deps]` | `deps-declared-once` (requirements files vs pyproject) | duplicate dependency declarations aren't checked |
 | `[tests]` | `test-assertions` (every test carries an expectation) | assertion-free tests aren't checked |
+| `[scan]` | `scan`, and the `shiplock scan` command, over your git-tracked files | the leak & internal-reference scan doesn't run |
 
 ### The complete config, annotated
 
@@ -168,18 +169,30 @@ exempt = []                  # names allowed in both places
 [tests]                      # optional: omit to skip the assertion check
 globs = ["tests/**/*.py"]
 exempt = []                  # test names, or "path::test_name", allowed without one
+
+[scan]                       # optional: the leak & internal-reference scan
+# Local, gitignored files holding your sensitive inputs (code-names, home
+# usernames, personal emails). The path is yours to set; shiplock bakes in
+# none. A blocklist that git tracks is refused as a finding.
+blocklist = ["~/.config/shiplock-blocklist.toml", ".shiplock.local.toml"]
+secrets = false              # opt in to generic secret-pattern detection
+exclude = ["vendor/**"]      # tracked files to skip
+# [[scan.extra_refs]]        # repeatable: extend the internal-reference patterns
+# label = "ticket"
+# pattern = 'ACME-\d+'
 ```
 
 ## The checks
 
-Eleven deterministic checks, run in this order:
+Twelve deterministic checks, run in this order:
 
 | Check | Asserts |
 |---|---|
 | `docs-exist` | Every declared public doc exists on disk. |
 | `banned-words` | The house banned-word list (word-boundary, case-insensitive) is absent from public docs and the configured source globs. The changelog is swept only above its first released-version heading. |
-| `internal-refs` | No reference to an internal-only artifact appears in public docs: the gitignored planning folder, the coding-standards file, roadmap files, or assistant tool directories. A planning-folder path inside a `pypi.org` URL is carved out. |
+| `internal-refs` | No reference to an internal-only artifact appears in public docs: the gitignored planning folder, the coding-standards file, roadmap files, bug, lessons, and test logs, or assistant tool directories. A planning-folder path inside a `pypi.org` URL is carved out. `[scan].extra_refs` extends the pattern set for this check and `scan` together. |
 | `readme-links` | Every markdown link in the README is absolute (`http`, `https`, `#`, or `mailto`), since PyPI resolves relative links against pypi.org. |
+| `scan` | Over the git-tracked files (`git ls-files`), not only the declared docs: the same internal-reference patterns, plus, when a blocklist is configured, your project code-names, home paths, and personal emails. Every matched string is masked in the output. Runs only when `[scan]` is declared; the `shiplock scan` command runs it directly, with the house patterns, on any repo. See below. |
 | `version` | The pyproject version equals the package's `__version__`, and the changelog carries a heading for that version or an `[Unreleased]` section. |
 | `architecture` | Every top-level module and subpackage under the source directory is named in the architecture doc, or listed as exempt. |
 | `coverage` | Every member of a declared object appears in its declared doc. Three kinds: `enum` (member names), `params` (a callable's parameter names), `exports` (a module's `__all__`). |
@@ -187,6 +200,54 @@ Eleven deterministic checks, run in this order:
 | `versioned-files` | A declared data file whose content differs from the last reachable git tag has moved its version marker. |
 | `deps-declared-once` | No package is declared in both `pyproject.toml` (dependencies and optional groups) and a requirements file matched by `[deps].requirements`. Names compare in canonical form, so `Foo_Bar` and `foo-bar` are one package; comment, option, and URL lines are ignored. |
 | `test-assertions` | Every test function in the files matched by `[tests].globs` (module-level `test_*`, and `test_*` methods of `Test*` classes) contains an expectation: an `assert`, a `raises`/`warns`/`deprecated_call` context, or a call whose name starts with `assert`. A shared helper counts for the tests that call it: any call resolving to a function elsewhere in the test tree is followed, through same-module definitions, imports in any form, and `conftest.py`. A call resolving outside that tree is the code under test, so it's never an expectation. A test that only relies on code not raising should assert the side effect it exists to pin, or be exempted by name. |
+
+### The leak scan and its blocklist
+
+`internal-refs` reads only the docs you declare public. `scan` reads the whole
+git-tracked set, so a code-name in a test fixture or a README example, a file
+you never declared, doesn't reach a push. It flags the internal-reference
+patterns, and, when you point it at a blocklist, three identity classes:
+project code-names, home paths, and personal emails.
+
+The sensitive inputs live in a local file you gitignore, never in a repo's
+committed source and never in shiplock's. You set its path in `[scan].blocklist`;
+shiplock bakes in no default location. A global file covers every repo, and a
+repo-local one layers on top. A blocklist that git tracks is refused as a
+finding, so the one dangerous mistake fails the run instead of shipping.
+
+```toml
+# ~/.config/shiplock-blocklist.toml (or a repo-local, gitignored file)
+code_names = ["projectx", "bluebird"]   # flagged anywhere in a tracked file
+home_usernames = ["ada"]                # flags /Users/ada and /home/ada
+emails = ["ada@personal.example"]       # flags this address
+```
+
+Every finding names the file, the line, and the rule, and masks the match to
+its first character, so a code-name never echoes into the CI log the scan
+writes. With no blocklist configured, the identity classes skip with a notice
+and the internal-reference patterns still run. `.gitignore` and `.gitattributes`
+are never scanned: naming an internal directory there is what keeps it out of
+the repo. Binary files are skipped, and `[scan].exclude` globs skip more.
+
+`secrets = true` opts into generic secret-pattern detection (private-key blocks,
+common cloud and token forms). It's off by default: a dedicated scanner such as
+gitleaks covers secrets more thoroughly, and the broad patterns can fire on a
+fixture. shiplock owns the internal-reference and identity class; the switch is
+there for repos that want a coarse net in the same pass.
+
+Run it as its own command, so a git `pre-push` hook is one line:
+
+```bash
+shiplock scan            # scan the current repo's tracked files
+shiplock scan path/to/repo
+```
+
+`shiplock scan` runs with the house patterns on any repo, no config needed, and
+picks up your `[scan]` blocklist, extra patterns, and secrets switch when the
+repo declares them. In the gate, the `scan` check runs only when `[scan]` is
+declared, so upgrading shiplock never adds a failing check to a repo that hasn't
+opted in. Exit codes match the rest of the CLI: 0 clean, 1 a finding, 2 a usage
+or config error.
 
 ### The manifest reminder
 

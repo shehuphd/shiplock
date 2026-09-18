@@ -121,3 +121,54 @@ def test_deps_and_tests_sections_parse(tmp_path, write_file):
     assert config.tests is not None
     assert config.tests.globs == ["tests/**/*.py"]
     assert config.tests.exempt == ["test_smoke"]
+
+
+# --- [scan] section --------------------------------------------------------
+
+
+def test_scan_secrets_must_be_boolean(tmp_path, write_file):
+    write_file(tmp_path, "shiplock.toml", '[scan]\nsecrets = "yes"\n')
+    with pytest.raises(ConfigError, match="secrets must be a boolean"):
+        load_config(tmp_path)
+
+
+def test_scan_extra_refs_needs_label_and_pattern(tmp_path, write_file):
+    write_file(
+        tmp_path, "shiplock.toml", '[[scan.extra_refs]]\npattern = "X-\\\\d+"\n'
+    )
+    with pytest.raises(ConfigError, match="missing required key 'label'"):
+        load_config(tmp_path)
+
+
+def test_scan_extra_refs_rejects_a_bad_regex(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "shiplock.toml",
+        '[[scan.extra_refs]]\nlabel = "bad"\npattern = "([unclosed"\n',
+    )
+    with pytest.raises(ConfigError, match="not a valid regex"):
+        load_config(tmp_path)
+
+
+def test_scan_blocklist_accepts_a_bare_string(tmp_path, write_file):
+    write_file(tmp_path, "shiplock.toml", '[scan]\nblocklist = "~/.secrets.toml"\n')
+    config = load_config(tmp_path)
+    assert config.scan is not None
+    assert config.scan.blocklist == ["~/.secrets.toml"]
+
+
+def test_scan_section_parses(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "shiplock.toml",
+        '[scan]\nblocklist = ["a.toml", "b.toml"]\nsecrets = true\n'
+        'exclude = ["vendor/**"]\n\n'
+        '[[scan.extra_refs]]\nlabel = "ticket"\npattern = "ACME-\\\\d+"\n',
+    )
+    config = load_config(tmp_path)
+    assert config.scan is not None
+    assert config.scan.blocklist == ["a.toml", "b.toml"]
+    assert config.scan.secrets is True
+    assert config.scan.exclude == ["vendor/**"]
+    assert config.scan.extra_refs[0].label == "ticket"
+    assert config.scan.extra_refs[0].pattern == "ACME-\\d+"

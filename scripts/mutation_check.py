@@ -23,6 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CHECKS = ROOT / "src" / "shiplock" / "_checks.py"
 STYLE = ROOT / "src" / "shiplock" / "_style.py"
+SCAN = ROOT / "src" / "shiplock" / "_scan.py"
 PYTEST = [sys.executable, "-m", "pytest", "-q", "-p", "no:randomly"]
 
 # (file, anchor, mutated, test node). Each anchor must appear once.
@@ -60,11 +61,23 @@ MUTATIONS = [
     (CHECKS, "if not _has_expectation(func, module, index):",
      "if False and not _has_expectation(func, module, index):",
      "tests/test_checks.py::test_test_assertions_fires_on_a_test_with_no_expectation"),
+    (SCAN, "patterns = list(_HOUSE_REFS)",
+     "patterns = []",
+     "tests/test_scan.py::test_scan_reads_tracked_files_not_only_docs"),
+    (SCAN, "for cn in blocklist.code_names",
+     "for cn in []",
+     "tests/test_scan.py::test_scan_fires_on_code_name"),
+    (SCAN, "if rel is not None and rel in tracked:",
+     "if False and rel is not None and rel in tracked:",
+     "tests/test_scan.py::test_scan_refuses_a_tracked_blocklist"),
+    (SCAN, 'return match[0] + "*" * (len(match) - 1)',
+     "return match",
+     "tests/test_scan.py::test_scan_masks_the_matched_string"),
 ]
 
 
 def main() -> int:
-    originals = {path: path.read_text() for path in (CHECKS, STYLE)}
+    originals = {path: path.read_text() for path in (CHECKS, STYLE, SCAN)}
     all_caught = True
     try:
         for path, anchor, mutated, node in MUTATIONS:

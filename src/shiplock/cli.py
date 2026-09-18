@@ -32,7 +32,7 @@ EXIT_FINDINGS = 1
 EXIT_USAGE = 2
 
 _DESCRIPTION = "Docs-vs-code release checks: deterministic, plus semantic and ablation audit prompts."
-_COMMANDS = ("check", "prompt", "needs-import")
+_COMMANDS = ("check", "prompt", "needs-import", "scan")
 _PROMPT_KINDS = ("audit", "ablation")
 
 _RED = "\033[31m"
@@ -94,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "check":
         return _cmd_check(Path(args.path), as_json=args.json)
+    if args.command == "scan":
+        return _cmd_scan(Path(args.path), as_json=args.json)
     if args.command == "needs-import":
         return _cmd_needs_import(Path(args.path))
     return _cmd_prompt(args.kind)
@@ -122,6 +124,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="repo to check (default: the current directory)",
     )
     check.add_argument(
+        "--json",
+        action="store_true",
+        help="print the report as one JSON object on stdout",
+    )
+
+    scan = sub.add_parser(
+        "scan",
+        help="scan the git-tracked files for internal refs and identity leaks",
+        allow_abbrev=False,
+    )
+    scan.add_argument(
+        "path",
+        nargs="?",
+        default=".",
+        help="repo to scan (default: the current directory)",
+    )
+    scan.add_argument(
         "--json",
         action="store_true",
         help="print the report as one JSON object on stdout",
@@ -183,6 +202,43 @@ def _cmd_check(root: Path, as_json: bool = False) -> int:
                 f"https://github.com/shehuphd/shiplock/blob/main/USAGE.md",
                 file=sys.stderr,
             )
+        _render(report)
+    return EXIT_FINDINGS if not report.ok else EXIT_OK
+
+
+def _cmd_scan(root: Path, as_json: bool = False) -> int:
+    """Run the leak & internal-reference scan alone over ``root``.
+
+    Explicit invocation always scans: a repo that declares no ``[scan]`` gets
+    the default scan (house ref-patterns over the tracked set, no blocklist),
+    so a pre-push hook is one command with no setup. A declared ``[scan]`` adds
+    its blocklist, extra patterns, and the secrets switch. Exit codes match the
+    rest of the CLI: 0 clean, 1 a finding, 2 a usage or config error.
+    """
+    from shiplock._config import ScanConfig
+    from shiplock._scan import default_scan_config, run_scan
+
+    if not root.is_dir():
+        print(
+            f"shiplock: '{root}' isn't a directory it can scan. Point it at a "
+            f"repo root, or run it from inside one.",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+
+    defaulted = not (root / CONFIG_FILENAME).is_file()
+    try:
+        config = default_config(root) if defaulted else load_config(root)
+    except ConfigError as exc:
+        print(f"shiplock: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+
+    scan_cfg: ScanConfig = config.scan or default_scan_config()
+    findings, notices = run_scan(config, scan_cfg)
+    report = Report(findings=findings, notices=notices)
+    if as_json:
+        print(json.dumps(_to_json(report)))
+    else:
         _render(report)
     return EXIT_FINDINGS if not report.ok else EXIT_OK
 
@@ -277,6 +333,7 @@ def _print_welcome() -> None:
     print("Try:")
     print("  shiplock check path/to/repo   check any repo, no setup needed")
     print("  shiplock check                check the current directory")
+    print("  shiplock scan                 scan tracked files for leaks and internal refs")
     print("  shiplock prompt               print the semantic audit prompt")
     print("  shiplock prompt ablation      print the advisory ablation prompt")
     print("  shiplock needs-import         does this repo's config need it installed?")
