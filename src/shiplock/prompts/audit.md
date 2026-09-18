@@ -8,11 +8,11 @@ is still a defect, and delta-focused review is blind to it.
 
 The deterministic checks (`shiplock check`) have already run and cover the
 mechanical facts: missing docs, banned words, internal references in public
-docs, absolute README links, version alignment, the architecture module list,
-object coverage, the per-file manifest, versioned-file markers, dependency
-declarations duplicated between pyproject and requirements files, and tests
-with no assertion. Do not re-do their work. Yours is the semantic layer they
-can't reach.
+docs, absolute README links, the leak scan of the git-tracked files, version
+alignment, the architecture module list, object coverage, the per-file
+manifest, versioned-file markers, dependency declarations duplicated between
+pyproject and requirements files, and tests with no assertion. Do not re-do
+their work. Yours is the semantic layer they can't reach.
 
 ## How to work
 

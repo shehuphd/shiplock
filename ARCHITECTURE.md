@@ -43,9 +43,10 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
 #### Technical version
 
 - `cli.main` parses argv through `_build_parser` and dispatches `check` to
-  `cli._cmd_check`, `prompt` to `cli._cmd_prompt`, and `needs-import` to
-  `cli._cmd_needs_import` (which prints `_checks.needs_import(config)` as
-  `true`/`false` for the CI gate to read before installing the repo).
+  `cli._cmd_check`, `scan` to `cli._cmd_scan`, `prompt` to `cli._cmd_prompt`,
+  and `needs-import` to `cli._cmd_needs_import` (which prints
+  `_checks.needs_import(config)` as `true`/`false` for the CI gate to read
+  before installing the repo).
 - `_config.load_config` (or `_config.default_config` when no `shiplock.toml`
   exists) parses and validates the config into a frozen `Config`.
 - `_checks.run_checks` iterates the `_CHECKS` tuple; each check returns
