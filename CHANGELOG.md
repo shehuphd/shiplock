@@ -8,7 +8,7 @@ semantic versioning.
 ### Fixed
 - The `scan` and `internal-refs` checks no longer flag a configured
   `[scan].blocklist` path as an internal reference. The recommended blocklist
-  home sits under the assistant config directory, whose name is one of the
+  home is under the assistant config directory, whose name is one of the
   internal-reference patterns, so the line declaring the blocklist tripped that
   pattern and failed the scan reading the repo's own `shiplock.toml`. Each
   declared blocklist path is now carved out of the internal-reference match,
