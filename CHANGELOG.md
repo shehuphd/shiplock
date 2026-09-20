@@ -3,6 +3,18 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
+## [0.7.1] - 2026-09-20
+
+### Fixed
+- The `scan` and `internal-refs` checks no longer flag a configured
+  `[scan].blocklist` path as an internal reference. The recommended blocklist
+  home sits under the assistant config directory, whose name is one of the
+  internal-reference patterns, so the line declaring the blocklist tripped that
+  pattern and failed the scan reading the repo's own `shiplock.toml`. Each
+  declared blocklist path is now carved out of the internal-reference match,
+  the way a public package-index URL is carved out of the planning-folder
+  pattern; a match anywhere else on the line, or in any other file, still fires.
+
 ## [0.7.0] - 2026-09-18
 
 ### Added

@@ -34,8 +34,8 @@ MUTATIONS = [
     (STYLE, "hits.append(BannedHit(line=i, word=match.group(1).lower()))",
      "pass",
      "tests/test_style.py::test_whole_word_is_a_hit"),
-    (CHECKS, "if pattern.search(line):",
-     "if False and pattern.search(line):",
+    (CHECKS, "if pattern.search(probe):",
+     "if False and pattern.search(probe):",
      "tests/test_checks.py::test_internal_refs_fires_on_project_folder"),
     (CHECKS, "if not _is_absolute_link(target):",
      "if False and not _is_absolute_link(target):",
@@ -73,6 +73,9 @@ MUTATIONS = [
     (SCAN, 'return match[0] + "*" * (len(match) - 1)',
      "return match",
      "tests/test_scan.py::test_scan_masks_the_matched_string"),
+    (SCAN, 'line = line.replace(substring, " " * len(substring))',
+     "line = line",
+     "tests/test_scan.py::test_scan_exempts_a_configured_blocklist_path_from_refs"),
 ]
 
 

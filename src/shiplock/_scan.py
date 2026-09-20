@@ -102,6 +102,22 @@ def mask(match: str) -> str:
     return match[0] + "*" * (len(match) - 1)
 
 
+def strip_exempt(line: str, exempt: tuple[str, ...]) -> str:
+    """Blank out exempt substrings so a ref pattern can't match inside one.
+
+    A configured blocklist path is a reference to the blocklist mechanism, not
+    a leak: `~/.claude/shiplock-blocklist.toml` names the recommended blocklist
+    home, so the `.claude` pattern must not fire on the line that declares it.
+    This generalises the `pypi.org/project/` carve-out to the caller's declared
+    paths. Replacing with spaces of the same length keeps every other column,
+    and any leak elsewhere on the line, where it is.
+    """
+    for substring in exempt:
+        if substring and substring in line:
+            line = line.replace(substring, " " * len(substring))
+    return line
+
+
 def default_scan_config() -> ScanConfig:
     """The scan a bare ``shiplock scan`` runs when a repo declares no ``[scan]``.
 
@@ -142,6 +158,7 @@ def run_scan(config: Config, scan: ScanConfig) -> CheckResult:
         for email in blocklist.emails
     ]
     excludes = list(_HOUSE_EXCLUDES) + list(scan.exclude)
+    exempt = tuple(scan.blocklist)
 
     for rel in tracked:
         if _excluded(rel, excludes):
@@ -150,8 +167,9 @@ def run_scan(config: Config, scan: ScanConfig) -> CheckResult:
         if text is None:
             continue
         for i, line in enumerate(text.splitlines(), start=1):
+            ref_probe = strip_exempt(line, exempt)
             for label, pattern in ref_patterns:
-                if pattern.search(line):
+                if pattern.search(ref_probe):
                     findings.append(
                         Finding(name, f"internal reference to {label}", path=rel, line=i)
                     )

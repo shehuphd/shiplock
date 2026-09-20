@@ -285,3 +285,45 @@ def test_git_tracked_files_none_outside_repo(tmp_path):
 )
 def test_mask(value, expected):
     assert mask(value) == expected
+
+
+# --------------------------------------------------------------------------
+# Blocklist-path carve-out (a configured path is not an internal-ref leak)
+# --------------------------------------------------------------------------
+
+
+def test_scan_exempts_a_configured_blocklist_path_from_refs(git_repo, write_file):
+    # The recommended ~/.claude blocklist home must not trip the .claude pattern
+    # on the line that declares it.
+    write_file(git_repo, "conf.txt", 'blocklist = ["~/.claude/shiplock-blocklist.toml"]')
+    _add(git_repo, "conf.txt")
+    scan = ScanConfig(blocklist=["~/.claude/shiplock-blocklist.toml"])
+    findings, _ = run_scan(Config(root=git_repo, scan=scan), scan)
+    assert findings == []
+
+
+def test_scan_still_flags_claude_outside_the_blocklist_path(git_repo, write_file):
+    write_file(git_repo, "conf.txt", "see the .claude directory for tooling")
+    _add(git_repo, "conf.txt")
+    scan = ScanConfig(blocklist=["~/.claude/shiplock-blocklist.toml"])
+    findings, _ = run_scan(Config(root=git_repo, scan=scan), scan)
+    assert any("internal reference to .claude" in m for m in _messages(findings))
+
+
+def test_internal_refs_exempts_a_configured_blocklist_path(tmp_path, write_file):
+    from shiplock._config import DocsConfig
+
+    write_file(tmp_path, "USAGE.md", 'set blocklist = ["~/.claude/shiplock-blocklist.toml"]')
+    scan = ScanConfig(blocklist=["~/.claude/shiplock-blocklist.toml"])
+    config = Config(root=tmp_path, docs=DocsConfig(public=["USAGE.md"]), scan=scan)
+    findings, _ = check_internal_refs(config)
+    assert findings == []
+
+
+def test_strip_exempt_blanks_only_the_exempt_substring():
+    from shiplock._scan import strip_exempt
+
+    out = strip_exempt("a ~/.claude/x and a .codex ref", ("~/.claude/x",))
+    assert "~/.claude/x" not in out
+    assert ".codex" in out  # untouched
+    assert len(out) == len("a ~/.claude/x and a .codex ref")  # length preserved

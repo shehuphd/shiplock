@@ -213,7 +213,10 @@ The sensitive inputs live in a local file you gitignore, never in a repo's
 committed source and never in shiplock's. You set its path in `[scan].blocklist`;
 shiplock bakes in no default location. A global file covers every repo, and a
 repo-local one layers on top. A blocklist that git tracks is refused as a
-finding, so the one dangerous mistake fails the run instead of shipping.
+finding, so the one dangerous mistake fails the run instead of shipping. Each
+configured blocklist path is carved out of the internal-reference check, so
+pointing the blocklist under your assistant config directory doesn't trip the
+scan on the line that declares it; a match anywhere else still fires.
 
 ```toml
 # ~/.config/shiplock-blocklist.toml (or a repo-local, gitignored file)

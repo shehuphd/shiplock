@@ -23,7 +23,7 @@ from shiplock._config import (
 )
 from shiplock._introspect import IntrospectError, introspect
 from shiplock._report import Finding, Notice
-from shiplock._scan import build_ref_patterns, run_scan
+from shiplock._scan import build_ref_patterns, run_scan, strip_exempt
 
 CheckResult = tuple[list[Finding], list[Notice]]
 
@@ -132,6 +132,7 @@ def check_internal_refs(config: Config) -> CheckResult:
         return [], [Notice(name, "no [docs].public declared; skipped")]
 
     extra = config.scan.extra_refs if config.scan else []
+    exempt = tuple(config.scan.blocklist) if config.scan else ()
     patterns = build_ref_patterns(extra)
     findings: list[Finding] = []
     for rel in config.docs.public:
@@ -139,8 +140,9 @@ def check_internal_refs(config: Config) -> CheckResult:
         if text is None:
             continue
         for i, line in enumerate(text.splitlines(), start=1):
+            probe = strip_exempt(line, exempt)
             for label, pattern in patterns:
-                if pattern.search(line):
+                if pattern.search(probe):
                     findings.append(
                         Finding(
                             name,
