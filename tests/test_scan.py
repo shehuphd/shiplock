@@ -125,7 +125,7 @@ def _blocklisted_repo(git_repo, write_file, line: str):
     write_file(
         git_repo,
         ".secrets.toml",
-        'code_names = ["bluebird"]\nhome_usernames = ["mo"]\n'
+        'code_names = ["bluebird"]\nhome_usernames = ["ada"]\n'
         'emails = ["person@example.com"]\n',
     )
     write_file(git_repo, "doc.txt", line)
@@ -141,7 +141,7 @@ def test_scan_fires_on_code_name(git_repo, write_file):
 
 
 def test_scan_fires_on_home_path(git_repo, write_file):
-    config, scan = _blocklisted_repo(git_repo, write_file, "built under /Users/mo/dev")
+    config, scan = _blocklisted_repo(git_repo, write_file, "built under /Users/ada/dev")
     findings, _ = run_scan(config, scan)
     assert any(m.startswith("home path for user") for m in _messages(findings))
 
@@ -161,7 +161,7 @@ def test_scan_masks_the_matched_string(git_repo, write_file):
 
 
 def test_scan_notices_and_skips_identity_without_blocklist(git_repo, write_file):
-    write_file(git_repo, "doc.txt", "ship the bluebird build under /Users/mo")
+    write_file(git_repo, "doc.txt", "ship the bluebird build under /Users/ada")
     _add(git_repo, "doc.txt")
     findings, notices = run_scan(Config(root=git_repo), default_scan_config())
     assert not any(m.startswith("internal code-name") for m in _messages(findings))
@@ -281,7 +281,7 @@ def test_git_tracked_files_none_outside_repo(tmp_path):
 
 @pytest.mark.parametrize(
     "value,expected",
-    [("bluebird", "b*******"), ("mo", "m*"), ("x", "x"), ("", "")],
+    [("bluebird", "b*******"), ("ab", "a*"), ("x", "x"), ("", "")],
 )
 def test_mask(value, expected):
     assert mask(value) == expected
