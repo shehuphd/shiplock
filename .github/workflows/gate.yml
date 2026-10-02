@@ -11,9 +11,9 @@ name: shiplock gate
 #         AUDIT_API_KEY: ${{ secrets.YOUR_AUDIT_KEY }}
 #         SHIPLOCK_RULES: ${{ secrets.SHIPLOCK_RULES }}   # optional
 #
-# Layer 1 (check) runs the deterministic checks, with any private rules the
-# SHIPLOCK_RULES secret holds (the contents of a gitignored rules file). Layer 2 (audit) runs the
-# semantic audit and opens an issue on failure.
+# The check job runs the deterministic checks, with any private rules the
+# SHIPLOCK_RULES secret holds (the contents of a gitignored rules file). The
+# audit job runs the semantic audit and opens an issue on failure.
 #
 # Both audit secrets are provider-prefixed strings: "provider/key", e.g.
 # "anthropic/sk-ant-..." or "openai/sk-...". The gate reads the provider from
@@ -34,7 +34,7 @@ on:
         type: string
         default: "shiplock"
       run-audit:
-        description: "Run the Layer 2 semantic audit"
+        description: "Run the semantic audit job"
         type: boolean
         default: true
       audit-model:
@@ -388,13 +388,58 @@ jobs:
                 if [ -n "${{ inputs.audit-effort }}" ]; then
                   effort_flag="--effort ${{ inputs.audit-effort }}"
                 fi
+                # Capture claude's own exit so a failure fails over instead of
+                # being masked by the mapper below, which always exits clean.
+                claude_rc=0
                 ANTHROPIC_API_KEY="$3" claude -p "$(cat "$4")" \
                   --session-id "$SID" \
                   --model "$2" \
                   --allowedTools "Read,Grep,Glob,Write(audit-progress.md)" \
                   --permission-mode "${{ inputs.audit-permission-mode }}" \
                   $effort_flag \
-                  --output-format json > "$5"
+                  --output-format json > "$5.raw" || claude_rc=$?
+                # Anthropic reports input in three parts that sit beside each
+                # other: input_tokens is only what follows the last cache
+                # breakpoint, with cache reads and cache writes counted
+                # separately. Every other runner here counts cached tokens
+                # inside its input figure, so the envelope's input_tokens is
+                # the whole prompt on every provider: fresh + read + written.
+                # The 1h share of the writes rides along for pricing, as does
+                # the model id the CLI billed (modelUsage is keyed by the
+                # dated id even when the run was pinned to an alias) and the
+                # CLI's own cost figure, which prices the run when rates has
+                # no card for the model.
+                python3 -c '
+          import json, sys, pathlib
+          raw_path = pathlib.Path(sys.argv[1] + ".raw")
+          text = raw_path.read_text() if raw_path.exists() else ""
+          try:
+              raw = json.loads(text) if text.strip() else {}
+          except ValueError:
+              raw = {}
+          if not isinstance(raw, dict):
+              raw = {}
+          usage = raw.get("usage") or {}
+          fresh = usage.get("input_tokens") or 0
+          written = usage.get("cache_creation_input_tokens") or 0
+          read = usage.get("cache_read_input_tokens") or 0
+          split = usage.get("cache_creation") or {}
+          mapped = {
+              "input_tokens": (fresh + written + read) or None,
+              "output_tokens": usage.get("output_tokens"),
+              "cache_read_input_tokens": read or None,
+              "cache_creation_input_tokens": written or None,
+              "cache_creation_1h_input_tokens": split.get("ephemeral_1h_input_tokens") or None,
+          }
+          envelope = {"result": raw.get("result", "") if isinstance(raw.get("result"), str) else "",
+                      "usage": {k: v for k, v in mapped.items() if v is not None}}
+          billed = list((raw.get("modelUsage") or {}).keys())
+          if len(billed) == 1:
+              envelope["billed_model"] = billed[0]
+          if isinstance(raw.get("total_cost_usd"), (int, float)):
+              envelope["reported_cost_usd"] = raw["total_cost_usd"]
+          print(json.dumps(envelope))' "$5" > "$5"
+                return "$claude_rc"
                 ;;
               codex)
                 # codex's own sandbox (bubblewrap on Linux) can't set up its
@@ -529,8 +574,8 @@ jobs:
             echo "first attempt (${{ steps.runners.outputs.primary-provider }}) exited $rc; continuing on ${{ steps.runners.outputs.fallback-provider }}" >&2
             # Preserve attempt 1's whole output bundle before attempt 2
             # overwrites the audit.json* names: the envelope and whatever
-            # intermediates its provider wrote (codex's .events/.txt, gemini's
-            # .raw). A first attempt that died before writing anything still
+            # intermediates its provider wrote (codex's .events/.txt, claude's
+            # and gemini's .raw). A first attempt that died before writing anything still
             # leaves an empty audit-first.json marker, so the usage table shows
             # both attempts.
             for suffix in "" .events .txt .raw; do
@@ -563,8 +608,11 @@ jobs:
           # unpriced model, or a missing rates install all print n/a and can
           # never block the verdict. Cost is priced uniformly for every
           # provider from rates' own bundled snapshot (offline, no extra
-          # network call) rather than a CLI's self-reported estimate, which
-          # only some runners provide and which isn't comparable across them.
+          # network call), keyed on the model id the CLI billed when its
+          # envelope carries one (a pinned alias such as "sonnet" has no
+          # card of its own). A CLI's self-reported estimate, which only
+          # some runners provide and which isn't comparable across them, is
+          # shown only when rates can't price the run, and says so.
           usage_row() {
             # jq on an empty file exits 0 with no output; that's still n/a.
             v="$(jq -r "$2 // \"n/a\"" "$1" 2>/dev/null || true)"
@@ -574,42 +622,66 @@ jobs:
             python3 -c '
           import json, pathlib, sys, io, contextlib
 
+          def reported(raw):
+              value = (raw or {}).get("reported_cost_usd")
+              if isinstance(value, (int, float)):
+                  return f"{value:.4f} (CLI-reported)"
+              return "n/a"
+
+          def priced(usage, price):
+              # input_tokens is the whole prompt on every provider; the cache
+              # figures are parts of it, so fresh input is what remains. 1h
+              # cache writes bill at their own rate when the card has one.
+              total_in = usage.get("input_tokens") or 0
+              cache_r = usage.get("cache_read_input_tokens") or 0
+              cache_w = usage.get("cache_creation_input_tokens") or 0
+              cache_w_1h = min(usage.get("cache_creation_1h_input_tokens") or 0, cache_w)
+              out = usage.get("output_tokens") or 0
+              fresh_in = max(total_in - cache_r - cache_w, 0)
+              rate_1h = price.get("cache_write_1h_mtok")
+              parts = [(fresh_in, "input_mtok"), (cache_r, "cache_read_mtok"), (out, "output_mtok")]
+              if rate_1h is None:
+                  parts.append((cache_w, "cache_write_mtok"))
+              else:
+                  parts += [(cache_w - cache_w_1h, "cache_write_mtok"), (cache_w_1h, "cache_write_1h_mtok")]
+              total = 0.0
+              for tokens, unit in parts:
+                  if tokens <= 0:
+                      continue
+                  rate = price.get(unit)
+                  if rate is None:
+                      return None
+                  total += tokens * rate / 1_000_000
+              return f"{total:.4f}"
+
           def cost(path, provider, model):
-              try:
-                  import rates.ai as ai
-              except ImportError:
-                  return "n/a"
-              if not provider or not model:
-                  return "n/a"
               try:
                   raw = json.loads(pathlib.Path(path).read_text())
               except (OSError, ValueError):
                   return "n/a"
               usage = (raw or {}).get("usage") or {}
-              if not usage:
-                  return "n/a"
+              if not usage or not provider:
+                  return reported(raw)
               try:
-                  matches = ai.load().filter(provider=provider, model=model).models
+                  import rates.ai as ai
+              except ImportError:
+                  return reported(raw)
+              try:
+                  registry = ai.load()
               except Exception:
-                  return "n/a"
-              if not matches:
-                  return "n/a"
-              price = matches[0].price
-              total_in = usage.get("input_tokens") or 0
-              cache_r = usage.get("cache_read_input_tokens") or 0
-              cache_w = usage.get("cache_creation_input_tokens") or 0
-              out = usage.get("output_tokens") or 0
-              fresh_in = max(total_in - cache_r, 0)
-              total = 0.0
-              for tokens, unit in ((fresh_in, "input_mtok"), (cache_r, "cache_read_mtok"),
-                                   (cache_w, "cache_write_mtok"), (out, "output_mtok")):
-                  if tokens <= 0:
+                  return reported(raw)
+              candidates = [m for m in ((raw or {}).get("billed_model"), model) if m]
+              for candidate in candidates:
+                  try:
+                      matches = registry.filter(provider=provider, model=candidate).models
+                  except Exception:
                       continue
-                  rate = price.get(unit)
-                  if rate is None:
-                      return "n/a"
-                  total += tokens * rate / 1_000_000
-              return f"{total:.4f}"
+                  if not matches:
+                      continue
+                  figure = priced(usage, matches[0].price)
+                  if figure is not None:
+                      return figure
+              return reported(raw)
 
           # rates 1.0.0 prints a trace object to stdout on load; capture it into
           # a throwaway buffer so only the cost reaches stdout, which this
@@ -628,7 +700,7 @@ jobs:
           {
             echo "### Semantic audit usage"
             echo ""
-            echo "| Attempt | Input | Output | Cache read | Cache write | Cost (USD, via rates) |"
+            echo "| Attempt | Input | Output | Cache read | Cache write | Cost (USD) |"
             echo "|---|---|---|---|---|---|"
             if [ -e audit-first.json ]; then
               table_row audit-first.json "1 (interrupted, ${{ steps.runners.outputs.primary-provider }})" "${{ steps.runners.outputs.primary-provider }}" "${{ steps.runners.outputs.primary-model }}"
@@ -646,7 +718,7 @@ jobs:
           else
             cost="$(rates_cost audit.json "${{ steps.runners.outputs.primary-provider }}" "${{ steps.runners.outputs.primary-model }}")"
           fi
-          usage_line="Audit usage: $in_tok in / $out_tok out (cache: $cache_r read, $cache_w written); cost: $cost USD."
+          usage_line="Audit usage: $in_tok in / $out_tok out (of the input, $cache_r cache read and $cache_w cache written); cost: $cost USD."
           if [ -e audit-first.json ]; then
             usage_line="$usage_line Continued on the fallback provider after an interrupted first attempt; both attempts are in the job summary."
           fi

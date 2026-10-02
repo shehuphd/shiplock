@@ -130,6 +130,36 @@ class ScanConfig:
 
 
 @dataclass(frozen=True)
+class AnchorsConfig:
+    """``[anchors]``: the doc-anchors and doc-defaults checks.
+
+    ``exempt`` lists tokens the docs name on purpose that the code doesn't
+    declare (another tool's flag, an env var a CI service sets). ``defaults``
+    turns the stated-default comparison off when a repo's parser isn't
+    argparse.
+    """
+
+    exempt: list[str] = field(default_factory=list)
+    defaults: bool = True
+
+
+@dataclass(frozen=True)
+class JudgeConfig:
+    """``[judge]``: the model-judged layer, ``shiplock judge``.
+
+    ``docs`` defaults to ``[docs].public``. ``undocumented`` lists code
+    surface (flags, commands, env vars) that stays out of the docs on
+    purpose, so coverage doesn't warn about it. ``provider`` names the
+    judgment provider; ``model`` pins its model.
+    """
+
+    docs: list[str] = field(default_factory=list)
+    undocumented: list[str] = field(default_factory=list)
+    provider: str = "typesafe"
+    model: str = "jev-1.13.0"
+
+
+@dataclass(frozen=True)
 class Config:
     """A repo's fully-parsed shiplock config, rooted at ``root``."""
 
@@ -144,6 +174,8 @@ class Config:
     deps: DepsConfig | None = None
     tests: TestsConfig | None = None
     scan: ScanConfig | None = None
+    anchors: AnchorsConfig | None = None
+    judge: JudgeConfig | None = None
     # Extra rules files passed on the command line (``--rules``), e.g. the file
     # a CI gate writes from a repo secret. Read alongside ``[scan].blocklist``.
     rules_paths: tuple[str, ...] = ()
@@ -219,6 +251,8 @@ def _parse(root: Path, raw: dict) -> Config:
         "deps",
         "tests",
         "scan",
+        "anchors",
+        "judge",
     }
     unknown = set(raw) - known
     if unknown:
@@ -241,6 +275,8 @@ def _parse(root: Path, raw: dict) -> Config:
         deps=_parse_deps(raw.get("deps")),
         tests=_parse_tests(raw.get("tests")),
         scan=_parse_scan(raw.get("scan"), deprecations),
+        anchors=_parse_anchors(raw.get("anchors")),
+        judge=_parse_judge(raw.get("judge")),
         deprecations=tuple(deprecations),
     )
 
@@ -271,6 +307,37 @@ def _require_str(value: object, where: str) -> str:
     if not isinstance(value, str):
         raise ConfigError(f"{where} must be a string.")
     return value
+
+
+def _parse_anchors(section: object) -> AnchorsConfig | None:
+    if section is None:
+        return None
+    table = _require_table(section, "[anchors]")
+    unknown = set(table) - {"exempt", "defaults"}
+    if unknown:
+        raise ConfigError(f"[anchors] has unknown key(s): {', '.join(sorted(unknown))}.")
+    defaults = table.get("defaults", True)
+    if not isinstance(defaults, bool):
+        raise ConfigError("[anchors].defaults must be true or false.")
+    return AnchorsConfig(
+        exempt=_require_str_list(table.get("exempt", []), "[anchors].exempt"),
+        defaults=defaults,
+    )
+
+
+def _parse_judge(section: object) -> JudgeConfig | None:
+    if section is None:
+        return None
+    table = _require_table(section, "[judge]")
+    unknown = set(table) - {"docs", "undocumented", "provider", "model"}
+    if unknown:
+        raise ConfigError(f"[judge] has unknown key(s): {', '.join(sorted(unknown))}.")
+    return JudgeConfig(
+        docs=_require_str_list(table.get("docs", []), "[judge].docs"),
+        undocumented=_require_str_list(table.get("undocumented", []), "[judge].undocumented"),
+        provider=_require_str(table.get("provider", "typesafe"), "[judge].provider"),
+        model=_require_str(table.get("model", "jev-1.13.0"), "[judge].model"),
+    )
 
 
 def _parse_docs(section: object) -> DocsConfig | None:

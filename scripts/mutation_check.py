@@ -27,6 +27,7 @@ SCAN = ROOT / "src" / "shiplock" / "_scan.py"
 INIT = ROOT / "src" / "shiplock" / "_init.py"
 RULES = ROOT / "src" / "shiplock" / "_rules.py"
 SUGGEST = ROOT / "src" / "shiplock" / "_suggest.py"
+JUDGE = ROOT / "src" / "shiplock" / "_judge.py"
 PYTEST = [sys.executable, "-m", "pytest", "-q", "-p", "no:randomly"]
 
 # (file, anchor, mutated, test node). Each anchor must appear once.
@@ -121,6 +122,21 @@ MUTATIONS = [
     (SUGGEST, "        if _is_tool_dir(name):\n            continue",
      "        if False:\n            continue",
      "tests/test_suggest.py::test_suggests_ignored_folders_with_mention_counts"),
+    (CHECKS, "                if _anchor_resolves(index, kind, token):\n                    continue",
+     "                if True:\n                    continue",
+     "tests/test_judge.py::test_doc_anchors_fires_on_an_undeclared_flag_env_and_key"),
+    (CHECKS, "                if _defaults_agree(stated, actual):\n                    continue",
+     "                if True:\n                    continue",
+     "tests/test_judge.py::test_doc_defaults_fires_on_a_wrong_default_and_accepts_phrasing"),
+    (JUDGE, "                if status in (429, 500, 502, 503, 504, 529) and attempt < self.retries:",
+     "                if status in (403, 429, 500, 502, 503, 504, 529) and attempt < self.retries:",
+     "tests/test_judge.py::test_typesafe_adapter_retries_429_and_never_403"),
+    (JUDGE, "        if p < COVERAGE_WARN:",
+     "        if False:",
+     "tests/test_judge.py::test_run_judge_warns_on_uncovered_surface_and_collects_leads"),
+    (JUDGE, "    if drift:",
+     "    if False:",
+     "tests/test_judge.py::test_run_judge_flags_model_drift"),
     (CHECKS, "    if not banned:",
      "    if False:",
      "tests/test_checks.py::test_banned_words_skips_when_no_words_declared"),
@@ -128,7 +144,7 @@ MUTATIONS = [
 
 
 def main() -> int:
-    originals = {path: path.read_text() for path in (CHECKS, STYLE, SCAN, INIT, RULES, SUGGEST)}
+    originals = {path: path.read_text() for path in (CHECKS, STYLE, SCAN, INIT, RULES, SUGGEST, JUDGE)}
     all_caught = True
     try:
         for path, anchor, mutated, node in MUTATIONS:

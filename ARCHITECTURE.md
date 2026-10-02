@@ -9,7 +9,7 @@ the full map of its structure, components, integrations, and testing.
 
 ### Shape
 
-Shiplock is a docs-vs-code release gate: twelve deterministic checks that run
+Shiplock is a docs-vs-code release gate: fourteen deterministic checks that run
 the same way in a terminal, a test suite, and CI, plus two shipped agent
 prompts (the gating semantic audit and an advisory ablation report), all
 configured per repo by one `shiplock.toml`.
@@ -34,7 +34,7 @@ configured per repo by one `shiplock.toml`.
 #### Plain-English version
 
 A check run loads the repo's config, or builds the default one when no config
-file exists, then hands it to each of the twelve checks in a fixed order.
+file exists, then hands it to each of the fourteen checks in a fixed order.
 Every check reads what it needs (files, git, or a subprocess import of the
 checked package), reports each disagreement as a finding and each skip as a
 notice, and the CLI prints findings to stdout, notices and the summary to
@@ -43,10 +43,11 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
 #### Technical version
 
 - `cli.main` parses argv through `_build_parser` and dispatches `check` to
-  `cli._cmd_check`, `scan` to `cli._cmd_scan`, `prompt` to `cli._cmd_prompt`,
-  and `needs-import` to `cli._cmd_needs_import` (which prints
-  `_checks.needs_import(config)` as `true`/`false` for the CI gate to read
-  before installing the repo).
+  `cli._cmd_check`, `scan` to `cli._cmd_scan`, `judge` to `cli._cmd_judge`,
+  `init` to `cli._cmd_init`, `rules` to `cli._cmd_rules`, `prompt` to
+  `cli._cmd_prompt`, and `needs-import` to `cli._cmd_needs_import` (which
+  prints `_checks.needs_import(config)` as `true`/`false` for the CI gate to
+  read before installing the repo).
 - `_config.load_config` (or `_config.default_config` when no `shiplock.toml`
   exists) parses and validates the config into a frozen `Config`.
 - `_checks.run_checks` iterates the `_CHECKS` tuple; each check returns
@@ -67,6 +68,9 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
 | A rules file is missing, unreadable, or holds an unknown key or a bad regex | A `Notice` naming the file; the rest of the rules still apply. A rules file that git tracks is a `Finding` |
 | `rules add` targets a rules file with hand-written comments | `RulesFileError` naming the file, exit 2; the entry to add is printed, and `--rewrite` overrides |
 | A hook can't find shiplock (the interpreter moved, nothing on PATH) | The hook exits 1 with a message naming the fix and `--no-verify`; the commit or push is blocked rather than let through unchecked |
+| The judge's key is missing, dead, or names an unknown provider | `JudgeError`, one sentence on stderr, exit 2, before any billable call beyond the pre-flight |
+| The provider blocks a request (403) | The chunk is recorded in the result's `refused` list; a coverage document is split in halves and each half asked; the run continues and the closing info notice counts the refusals |
+| The provider resolves a model other than the pinned one | A `Finding`, so a silent model change can't pass as a normal run |
 | `rules push-secret` without `gh`, or `gh` not logged in | One sentence on stderr, exit 2; the rules never leave the machine |
 | `scan --range` gets a range git can't resolve | A `Notice`; nothing is scanned, and the hook that passed it sees exit 0, so the hook script is what must pass a valid range |
 | A swept file is unreadable or not valid UTF-8 | Read leniently or skipped by `_read_text`; ASCII patterns still match |
@@ -81,7 +85,8 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
   never means skipped.
 - The test suite writes a per-run CSV artifact under `.test-runs/`, rows
   sorted so any two runs produce a readable diff.
-- In CI, the job summary carries each audit attempt's token usage and a
+- In CI, the job summary carries each audit attempt's token usage (input
+  counted whole, cached tokens included, on every provider) and a
   rates-priced USD cost; a failed audit opens an issue carrying its findings,
   and a failed run uploads the audit's raw output as an
   `audit-debug-<run id>` artifact.
@@ -106,6 +111,8 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
   merge commit's own conflict resolution isn't scanned.
 - The hooks `init` writes are POSIX `sh` scripts; on Windows they need Git
   for Windows' shell, which git uses for hooks anyway.
+- The judge's claim answers are leads, never findings, and uncovered surface is a warning: two evals put sentence-level judgment below the bar for gating, so only the audit-output structure and model drift can fail a judge run.
+- `doc-defaults` reads argparse only; a repo with another parser gets no default comparison (`[anchors].defaults = false` silences the skip notice's suggestion).
 - `rules suggest` sees only ignored folders that exist on the current
   machine, since git reports what's present.
 
@@ -115,11 +122,14 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
 shiplock/
 ├── src/shiplock/
 │   ├── __init__.py       # public API re-exports and __version__
-│   ├── cli.py            # command-line entry point (check, scan, init, rules, prompt, needs-import)
+│   ├── cli.py            # command-line entry point (check, scan, judge, init, rules, prompt, needs-import)
 │   ├── __main__.py       # python -m shiplock, the form the git hooks use
 │   ├── _compat.py        # version-guarded imports (tomllib), defined once
 │   ├── _config.py        # shiplock.toml loader and typed config model
-│   ├── _checks.py        # the twelve checks and the runner
+│   ├── _checks.py        # the fourteen checks and the runner
+│   ├── _symbols.py       # the symbol index over the repo's source
+│   ├── _claims.py        # claims from the docs, coverage items from the code
+│   ├── _judge.py         # the judge: provider registry, TypeSafe adapter, the run
 │   ├── _report.py        # Finding, Notice, Report result types
 │   ├── _style.py         # the banned-word list and matcher
 │   ├── _scan.py          # the rules loader and the leak & internal-reference scan
@@ -135,7 +145,9 @@ shiplock/
 │   ├── workflows/        # gate.yml (reusable), tests.yml, release-gate.yml, release.yml, audit-eval.yml
 │   └── dependabot.yml
 ├── scripts/
-│   └── mutation_check.py # breaks each check to confirm its test guards it
+│   ├── mutation_check.py # breaks each check to confirm its test guards it
+│   ├── judge_eval.py     # the judge's claim-direction eval (live, billable)
+│   └── judge_fact_eval.py # the judge's atomic-fact eval (live, billable)
 ├── tests/                # the suite (see MANIFEST.md for the per-file map)
 ├── shiplock.toml         # shiplock's own config (consumer zero)
 ├── pyproject.toml
@@ -171,10 +183,10 @@ shiplock check
 
 | Module | Responsibility |
 |---|---|
-| `cli` | Parses arguments, dispatches `check`, `scan`, `init`, `rules`, `prompt`, and `needs-import`, renders the report, owns the exit-code contract. Greets a bare invocation, translates argparse errors into sentences with fuzzy command suggestions, and colors the finding/clean categories on a tty (`NO_COLOR` honored). |
+| `cli` | Parses arguments, dispatches `check`, `scan`, `judge`, `init`, `rules`, `prompt`, and `needs-import`, renders the report, owns the exit-code contract. Greets a bare invocation, translates argparse errors into sentences with fuzzy command suggestions, and colors the finding/clean categories on a tty (`NO_COLOR` honored). |
 | `_compat` | Version-guarded imports in one place: `tomllib` from the standard library on 3.11+, the `tomli` backport on 3.10. |
 | `_config` | Reads `shiplock.toml`, validates it, and returns a frozen `Config` of typed sections. Raises `ConfigError` on an unknown top-level section, a wrong-typed value, or a section missing a required field. |
-| `_checks` | Holds the twelve check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
+| `_checks` | Holds the fourteen check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
 | `_report` | Defines `Finding` (a disagreement), `Notice` (a skip or a warning, with its reason), and `Report` (both, plus `ok`). |
 | `_style` | The word-boundary banned-word matcher over the words a repo declares in `[style].banned`. Ships no word list. |
 | `_scan` | Loads the rules (the user's per-machine file, committed `[scan].refs`, gitignored repo rules files, `--rules` files), then runs the leak & internal-reference scan in one of three modes: the git-tracked set, the staged diff, or a commit range's added lines and messages. One line scanner serves all three: ref patterns, the identity classes, path-scoped `allow` with masked counts, and an opt-in secret switch. |
@@ -182,6 +194,9 @@ shiplock check
 | `_suggest` | Lists the folders git ignores in a repo (via `git ls-files --ignored`, filtered through `git check-ignore` so a folder collapsed for having only ignored contents isn't listed) and the files a `.gitignore` line names outright, minus a curated tuple of tool-output names and anything an existing rule covers, with how many tracked files name each. Writes nothing. |
 | `_init` | `shiplock init`: writes a starter `shiplock.toml` from the detected docs, an empty rules file, the `.gitignore` line, and the `pre-commit` and `pre-push` hooks, each carrying the absolute interpreter path with a PATH fallback and a fail-closed branch. Never overwrites; leaves a `core.hooksPath` set outside the repo alone and prints the lines to add. |
 | `__main__` | `python -m shiplock`, so a hook can run the installed copy through its interpreter without that interpreter's `bin` on PATH. |
+| `_symbols` | The symbol index: functions, classes, assignments, argparse flags with literal defaults and actions, commands, env-var reads, and string literals, per tracked source file. Feeds `doc-anchors`, `doc-defaults`, and the judge's evidence. |
+| `_claims` | Deterministic extraction for the judge: anchored doc sentences with the code and prose behind each anchor, per-doc unanchored counts, and coverage items from the code surface minus `[judge].undocumented`. |
+| `_judge` | The judge run: the provider registry and TypeSafe adapter, pre-flight, coverage questions (with the 403 half-split), claim leads, the audit-output check, spend records, model-drift detection, and the prompt section `--judgments` appends. |
 | `_introspect` | Reads a package's `__version__`, `__all__`, enum members, and callable signatures in a subprocess that binds `sys.path` to the checked root, so `version` and `coverage` never read a stale installed copy. |
 
 ## The check registry
@@ -191,16 +206,42 @@ and returning `(findings, notices)`. The order in that tuple is the order
 findings are reported in. Adding a check means adding a function and one tuple
 entry; nothing else in the runner changes.
 
-The twelve checks: `docs-exist`, `banned-words`, `internal-refs`,
-`readme-links`, `scan`, `version`, `architecture`, `coverage`, `manifest`,
-`versioned-files`, `deps-declared-once`, `test-assertions`. Each is documented
-in [USAGE.md](USAGE.md).
+The fourteen checks: `docs-exist`, `banned-words`, `internal-refs`,
+`readme-links`, `doc-anchors`, `doc-defaults`, `scan`, `version`,
+`architecture`, `coverage`, `manifest`, `versioned-files`,
+`deps-declared-once`, `test-assertions`. Each is documented in
+[USAGE.md](USAGE.md).
+
+## The judge
+
+`shiplock judge` is a third layer between the checks and the agent audit:
+typed questions to a judgment provider, answered with probabilities, no text
+generated. `_symbols` indexes the repo's source (Python through `ast`, other
+languages by regex); `_claims` turns the docs into anchored claims with the
+code and prose behind each anchor, and the code into coverage items (flags,
+commands, env vars); `_judge` holds a provider registry (`typesafe` first,
+one POST over `urllib`), pre-flights the key, asks every question of a chunk
+in one call, retries 429, 500, 502, 503, 504, and 529, never retries a 403 (a content block on
+this provider) and splits a blocked document in halves instead, records
+spend per call, and compares the resolved model with the pinned one. Uncovered
+surface is a warning; claim answers are leads written to JSON for
+`shiplock prompt --judgments`; nothing the model says fails a run except a
+model-drift finding and, with `--audit-output`, a missing verdict line, an
+untracked cited path, or a verdict that doesn't follow from the findings.
+The scope came from two evals (`scripts/judge_eval.py`,
+`scripts/judge_fact_eval.py`): sentence-level judgments weren't reliable
+enough to gate; coverage questions were reliable enough to warn on.
 
 ## Data stores
 
-None. Shiplock holds no state between runs. It reads a repo's files and git
-metadata (via the `git` CLI, for the `versioned-files` and `manifest` checks)
-and writes only to stdout and stderr.
+None between runs. `check`, `scan`, and `judge` read a repo's files and git
+metadata (via the `git` CLI) and write only to stdout and stderr, apart from
+`judge --out FILE`, which writes its result where asked. The setup commands
+write by design: `init` writes `shiplock.toml`, `shiplock.local.toml`, a
+`.gitignore` line, and two hook scripts, never over a file that exists;
+`rules` rewrites the rules file it targets; `rules push-secret` runs
+`gh secret set`. The user rules file under the config directory is read, and
+written only by `rules --user`.
 
 ## External integrations
 
@@ -235,7 +276,11 @@ CI lives in `.github/workflows/`:
   `AUDIT: FAIL` verdict, fails
   closed when no verdict line is present, and writes each attempt's token
   usage and a [rates](https://pypi.org/project/rates/)-priced USD cost to the
-  job summary (and the issue footer). With a fallback key from a
+  job summary (and the issue footer). Each runner's output is mapped to one
+  usage shape first, with input as the whole prompt and the cache figures as
+  parts of it; the Claude mapper adds Anthropic's three separate input
+  counts, keeps the billed model id for pricing, and keeps the CLI's own
+  cost figure for the case rates has no card. With a fallback key from a
   second provider configured, an interrupted audit continues from its own
   progress log where the primary adapter could write one (Claude, Codex); a
   Gemini primary, run without a write tool, restarts on the fallback instead.
@@ -264,11 +309,17 @@ CI lives in `.github/workflows/`:
 
 ## Security considerations
 
-Shiplock reads files and runs read-only git commands over a repo it's pointed
-at. It executes no code from the repo beyond importing the declared package for
-the `version` and `coverage` checks — the same import the repo's own test suite
-performs — and that import runs in a separate subprocess (`_introspect`), so it
-can't disturb the tool's own process or a caller's pytest session.
+`shiplock check`, `scan`, and `judge` read files and run read-only git
+commands over a repo they're pointed at. They execute no code from the repo
+beyond importing the declared package for the `version` and `coverage`
+checks — the same import the repo's own test suite performs — and that import
+runs in a separate subprocess (`_introspect`), so it can't disturb the tool's
+own process or a caller's pytest session. `init` writes files into the repo
+and its hooks directory (never over one that exists, and never into a hooks
+path set outside the repo); `rules` writes the rules files; `push-secret`
+hands the merged rules to `gh` on stdin. `judge` sends the judged docs and the
+code excerpts behind their anchors to the configured provider, and reads its
+key from the environment only.
 
 ## Development and testing
 

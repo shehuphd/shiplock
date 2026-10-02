@@ -135,18 +135,35 @@ def render(rules: RulesFile) -> str:
     return "".join(out)
 
 
-def save(rules: RulesFile, rewrite: bool = False) -> None:
-    """Write the file, refusing to drop a person's comments unless ``rewrite``."""
+def save(rules: RulesFile, rewrite: bool = False, entry: str = "") -> None:
+    """Write the file, refusing to drop a person's comments unless ``rewrite``.
+
+    ``entry`` is the TOML for what the caller just added, printed in the
+    refusal so the person can paste it in by hand.
+    """
     path = rules.path
     if path.is_file() and not rewrite:
         text = path.read_text(encoding="utf-8")
         if has_foreign_comments(text):
+            shown = f"\n{entry.rstrip()}\n" if entry else " "
             raise RulesFileError(
-                f"{path} holds comments that a rewrite would drop. Add the entry by "
-                f"hand, or rerun with --rewrite to let shiplock rewrite the file."
+                f"{path} holds comments that a rewrite would drop. Add this by hand:"
+                f"{shown}or rerun with --rewrite to let shiplock rewrite the file."
             )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render(rules), encoding="utf-8")
+
+
+def entry_toml(kind: str, value: str, pattern: str | None = None, scope: Scope = ()) -> str:
+    """The TOML a person would paste to add one entry by hand."""
+    if kind in _LIST_KEY:
+        return f"{_LIST_KEY[kind]} = [{_toml_str(value)}]"
+    if kind == "allow":
+        if scope:
+            return f"allow = [{{ value = {_toml_str(value)}, paths = [{', '.join(_toml_str(g) for g in scope)}] }}]"
+        return f"allow = [{_toml_str(value)}]"
+    label, pat = (value, pattern or "") if kind == "ref" else (folder_rule(value) if kind == "folder" else file_rule(value))
+    return f"refs = [{{ label = {_toml_str(label)}, pattern = {_toml_str(pat)} }}]"
 
 
 def _toml_str(value: str) -> str:
@@ -280,7 +297,7 @@ def allow_entry(rules: RulesFile, value: str, paths: list[str]) -> str:
 
 
 def remove_rule(rules: RulesFile, kind: str, value: str) -> bool:
-    """Remove a rule by kind and value (a ref, folder, or file by label)."""
+    """Remove a rule by kind and value: a list entry, a ref, folder, or file by label, or an allow entry."""
     if kind in _LIST_KEY:
         bucket: list[str] = getattr(rules, _LIST_KEY[kind])
         before = len(bucket)

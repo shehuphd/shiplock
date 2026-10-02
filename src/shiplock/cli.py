@@ -1,4 +1,4 @@
-"""Command-line entry point: ``check``, ``scan``, ``init``, ``rules``, ``prompt``, and ``needs-import``.
+"""Command-line entry point: ``check``, ``scan``, ``judge``, ``init``, ``rules``, ``prompt``, and ``needs-import``.
 
 Exit codes are contractual: 0 clean, 1 a check found a problem, 2 a config or
 usage error. Findings print to stdout (the answer to what was asked); notices
@@ -33,7 +33,7 @@ EXIT_FINDINGS = 1
 EXIT_USAGE = 2
 
 _DESCRIPTION = "Docs-vs-code release checks: deterministic, plus semantic and ablation audit prompts."
-_COMMANDS = ("check", "scan", "init", "rules", "prompt", "needs-import")
+_COMMANDS = ("check", "scan", "judge", "init", "rules", "prompt", "needs-import")
 _PROMPT_KINDS = ("audit", "ablation")
 _RULE_KINDS = ("code-name", "email", "username", "ref", "folder", "file")
 
@@ -106,11 +106,16 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "needs-import":
         return _cmd_needs_import(Path(args.path))
+    if args.command == "judge":
+        return _cmd_judge(
+            Path(args.path), as_json=args.json, out=args.out, audit_output=args.audit_output,
+            leads=not args.no_leads,
+        )
     if args.command == "init":
         return _cmd_init(Path(args.path), hooks=not args.no_hooks)
     if args.command == "rules":
         return _cmd_rules(args)
-    return _cmd_prompt(args.kind)
+    return _cmd_prompt(args.kind, judgments=args.judgments)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -188,6 +193,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "files; what a pre-commit hook checks",
     )
 
+    judge = sub.add_parser(
+        "judge",
+        help="ask a judgment provider about doc coverage and doc claims (billable)",
+        allow_abbrev=False,
+    )
+    judge.add_argument("path", nargs="?", default=".", help="repo to judge (default: the current directory)")
+    judge.add_argument("--json", action="store_true", help="print the full result as one JSON object on stdout")
+    judge.add_argument("--out", metavar="FILE", help="also write the full result to FILE, for 'shiplock prompt --judgments'")
+    judge.add_argument("--audit-output", metavar="FILE", help="also hold an agent audit's output in FILE against the repo")
+    judge.add_argument("--no-leads", action="store_true", help="skip the claim-level pass; coverage only")
+
     init = sub.add_parser(
         "init",
         help="set a repo up: starter config, rules file, .gitignore line, git hooks",
@@ -242,6 +258,11 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=_PROMPT_KINDS,
         help="which prompt: the gating docs-vs-code audit (default) or the "
         "advisory ablation audit",
+    )
+    prompt.add_argument(
+        "--judgments",
+        metavar="FILE",
+        help="append the leads from a 'shiplock judge --out FILE' run, for the agent to verify first",
     )
 
     needs = sub.add_parser(
@@ -403,7 +424,7 @@ def _cmd_rules(args: argparse.Namespace) -> int:
             path = _rules.target_path("allow", root, config, args.to_user)
             rules = _rules.load_rules_file(path)
             line = _rules.allow_entry(rules, args.value, args.paths)
-            _rules.save(rules, rewrite=args.rewrite)
+            _rules.save(rules, rewrite=args.rewrite, entry=_rules.entry_toml("allow", args.value, scope=tuple(args.paths)))
             print(f"shiplock rules: {line} ({path})")
             return EXIT_OK
         if args.rules_command == "remove":
@@ -432,7 +453,8 @@ def _rules_add(args: argparse.Namespace, root: Path, config) -> int:
     path = _rules.target_path(args.kind, root, config, args.to_user)
     rules = _rules.load_rules_file(path)
     lines = [_rules.add_rule(rules, args.kind, value, args.pattern) for value in args.values]
-    _rules.save(rules, rewrite=args.rewrite)
+    entry = "\n".join(_rules.entry_toml(args.kind, v, args.pattern) for v in args.values)
+    _rules.save(rules, rewrite=args.rewrite, entry=entry)
     for line in lines:
         print(f"shiplock rules: added {line} ({path})")
     return EXIT_OK
@@ -587,15 +609,65 @@ def _render(report: Report) -> None:
         print(_paint(f"shiplock: {n} {word}", _RED, sys.stderr), file=sys.stderr)
 
 
-def _cmd_prompt(kind: str = "audit") -> int:
+def _cmd_prompt(kind: str = "audit", judgments: str | None = None) -> int:
     # Anchor on the shiplock package itself, not the prompts subdirectory, which
     # has no __init__ and would otherwise rely on namespace-package resolution.
     text = files("shiplock").joinpath("prompts", f"{kind}.md").read_text(encoding="utf-8")
+    if judgments is not None:
+        from shiplock._judge import judgments_section
+
+        path = Path(judgments)
+        if not path.is_file():
+            print(f"shiplock: judgments file '{judgments}' not found.", file=sys.stderr)
+            return EXIT_USAGE
+        try:
+            text = text.rstrip("\n") + "\n" + judgments_section(path) + "\n"
+        except (ValueError, KeyError, TypeError) as exc:
+            print(f"shiplock: judgments file '{judgments}' isn't a shiplock judge result: {exc}", file=sys.stderr)
+            return EXIT_USAGE
     # The prompt is content; print it verbatim without a trailing reformat.
     sys.stdout.write(text)
     if not text.endswith("\n"):
         sys.stdout.write("\n")
     return EXIT_OK
+
+
+def _cmd_judge(root: Path, as_json: bool = False, out: str | None = None, audit_output: str | None = None,
+               leads: bool = True) -> int:
+    """Run the judge: coverage warnings, claim leads, an optional audit-output check.
+
+    Billable: every run calls the provider. The key comes from
+    ``JUDGE_API_KEY`` (``provider/key``) or ``TYPESAFE_API_KEY``, never from
+    an argument, so it stays out of process lists and shell history.
+    """
+    from shiplock._judge import JudgeError, adapter_for, run_judge
+
+    if not root.is_dir():
+        print(f"shiplock: '{root}' isn't a directory it can judge.", file=sys.stderr)
+        return EXIT_USAGE
+    config = _config_for(root)
+    if config is None:
+        return EXIT_USAGE
+    judge_cfg = config.judge
+    provider = judge_cfg.provider if judge_cfg else "typesafe"
+    key = os.environ.get("JUDGE_API_KEY") or os.environ.get("TYPESAFE_API_KEY") or ""
+    try:
+        adapter = adapter_for(provider, key)
+        result = run_judge(config, adapter, judge_cfg, audit_output=audit_output, leads=leads)
+    except JudgeError as exc:
+        print(f"shiplock: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    if out:
+        Path(out).write_text(json.dumps(result.to_json(), indent=2), encoding="utf-8")
+    report = Report(findings=result.findings, notices=result.notices)
+    if as_json:
+        print(json.dumps({**_to_json(report), **result.to_json()}))
+    else:
+        _render(report)
+        if result.leads:
+            n = len(result.leads)
+            print(f"shiplock: {n} claim lead(s) for the audit" + (f"; written to {out}" if out else "; add --out FILE to keep them"), file=sys.stderr)
+    return EXIT_FINDINGS if not report.ok else EXIT_OK
 
 
 def _print_welcome() -> None:
@@ -606,6 +678,7 @@ def _print_welcome() -> None:
     print("  shiplock check path/to/repo   check any repo, no setup needed")
     print("  shiplock check                check the current directory")
     print("  shiplock scan                 scan tracked files for leaks and internal refs")
+    print("  shiplock judge                ask a judgment model about doc coverage (billable)")
     print("  shiplock init                 set a repo up: config, rules file, git hooks")
     print("  shiplock rules add ...        add a code-name, email, folder, or file to keep out")
     print("  shiplock prompt               print the semantic audit prompt")

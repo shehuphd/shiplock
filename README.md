@@ -63,20 +63,29 @@ repo's surfaces. The full schema, section by
 section, is in
 [USAGE.md](https://github.com/shehuphd/shiplock/blob/main/USAGE.md).
 
-## Two layers
+## Three layers
 
-Shiplock checks in two layers:
+Shiplock checks in three layers:
 
 1. **Deterministic checks** (`shiplock check`) — fast, exact, no model. Missing
    docs, the words you ban, internal references in public docs, absolute README
-   links, a leak scan of the git-tracked files, version alignment, the
-   architecture module list, object coverage, the per-file manifest,
-   versioned-file markers, dependency declarations duplicated between pyproject
-   and requirements files, tests that carry no assertion.
-2. **A semantic audit** (`shiplock prompt`) — the prompt for a fresh agent to
+   links, the flags, env vars, and config keys the docs name existing in the
+   code, stated flag defaults matching the parser's, a leak scan of the
+   git-tracked files, version alignment, the architecture module list, object
+   coverage, the per-file manifest, versioned-file markers, dependency
+   declarations duplicated between pyproject and requirements files, tests
+   that carry no assertion.
+2. **A typed judge** (`shiplock judge`) — questions to a judgment model
+   (TypeSafe's Jev) that answers each with a probability: which flags,
+   commands, and env vars the docs don't describe, and which doc sentences the
+   code behind them doesn't obviously support. Uncovered surface is a warning;
+   doubted sentences become leads for the audit. Runs only when invoked, and
+   it's billable.
+3. **A semantic audit** (`shiplock prompt`) — the prompt for a fresh agent to
    read the code and hold every doc claim against it, from state rather than
-   from what changed. Centrally versioned inside the package, so every repo gets
-   prompt updates on the next install.
+   from what changed, with the judge's leads first when there are any.
+   Centrally versioned inside the package, so every repo gets prompt updates on
+   the next install.
 
 The leak scan also runs on its own, and in the git hooks `shiplock init`
 installs (`pre-commit` over the staged diff, `pre-push` over the pushed
@@ -126,8 +135,9 @@ The full API surface is in
 
 ## In CI
 
-Shiplock ships a reusable GitHub Actions workflow that runs both layers on
-every push and pull request, and opens an issue when the audit fails:
+Shiplock ships a reusable GitHub Actions workflow that runs the deterministic
+checks on every push and pull request and the semantic audit when asked, and
+opens an issue when the audit fails:
 
 ```yaml
 jobs:

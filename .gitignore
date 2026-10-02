@@ -23,3 +23,5 @@ dist/
 
 # Local shiplock rules: private patterns and identities, never committed.
 shiplock.local.toml
+# Judge eval output (raw calls, reports).
+eval-runs/

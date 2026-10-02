@@ -485,6 +485,79 @@ def test_rates_prices_each_provider_from_its_own_usage(gate):
     assert "| 2 (continued, openai) | 50 | 900 | 40000 | n/a | 0.0196 |" in summary
 
 
+_CLAUDE_RESULT = {
+    "type": "result",
+    "result": "read the docs\nAUDIT: PASS",
+    # Anthropic's three-part input: 30 fresh tokens beside 42377 written and
+    # 3327061 read, the shape a live run printed as "30 in".
+    "usage": {
+        "input_tokens": 30,
+        "cache_creation_input_tokens": 42377,
+        "cache_read_input_tokens": 3327061,
+        "output_tokens": 11822,
+        "cache_creation": {"ephemeral_5m_input_tokens": 42377, "ephemeral_1h_input_tokens": 0},
+    },
+    "modelUsage": {"claude-sonnet-4-5-20250929": {"costUSD": 1.33}},
+    "total_cost_usd": 1.33,
+}
+
+
+def _claude_succeeds(gate, result: dict) -> None:
+    body = (
+        f'[ "$ANTHROPIC_API_KEY" = "{PRIMARY_BARE_KEY}" ] || {{ echo "wrong key" >&2; exit 99; }}\n'
+        f"cat <<'EOF'\n{json.dumps(result)}\nEOF\n"
+    )
+    _write_stub(gate.bin_dir, "claude", body)
+
+
+def test_claude_input_counts_cached_tokens_and_prices_the_billed_model(gate):
+    # Pinned to the alias "sonnet", which rates has no card for; the CLI's
+    # envelope names the dated id it billed, and the cost is priced on that.
+    primary = f"anthropic/{PRIMARY_BARE_KEY}"
+    _claude_succeeds(gate, _CLAUDE_RESULT)
+    gate(STEP_RUNNERS, primary=primary)
+    audit = gate(STEP_AUDIT, primary=primary)
+    assert audit.returncode == 0, audit.stderr
+    verdict = gate(STEP_VERDICT, primary=primary)
+    assert verdict.returncode == 0, verdict.stderr
+
+    envelope = json.loads((gate.work / "audit.json").read_text())
+    assert envelope["usage"]["input_tokens"] == 30 + 42377 + 3327061
+    assert envelope["billed_model"] == "claude-sonnet-4-5-20250929"
+    # claude-sonnet-4-5's card: input 3, cache read 0.3, cache write 3.75,
+    # output 15 (USD per Mtok). Fresh input is the whole minus both cache
+    # parts, so the 30 fresh tokens are priced once, at the input rate.
+    expected = (30 * 3 + 3327061 * 0.3 + 42377 * 3.75 + 11822 * 15) / 1_000_000
+    summary = gate.summary_file.read_text()
+    assert f"| 1 (anthropic) | 3369468 | 11822 | 3327061 | 42377 | {expected:.4f} |" in summary
+    assert "Audit usage: 3369468 in / 11822 out" in verdict.stdout
+
+
+def test_claude_cost_falls_back_to_the_cli_figure_when_rates_has_no_card(gate):
+    primary = f"anthropic/{PRIMARY_BARE_KEY}"
+    result = dict(_CLAUDE_RESULT, modelUsage={"claude-test": {"costUSD": 1.5}}, total_cost_usd=1.5)
+    _claude_succeeds(gate, result)
+    gate(STEP_RUNNERS, primary=primary)
+    gate(STEP_AUDIT, primary=primary)
+    verdict = gate(STEP_VERDICT, primary=primary)
+    assert verdict.returncode == 0, verdict.stderr
+    assert "| 42377 | 1.5000 (CLI-reported) |" in gate.summary_file.read_text()
+
+
+def test_claude_one_hour_cache_writes_bill_at_their_own_rate(gate):
+    primary = f"anthropic/{PRIMARY_BARE_KEY}"
+    usage = dict(_CLAUDE_RESULT["usage"], cache_creation={
+        "ephemeral_5m_input_tokens": 2377, "ephemeral_1h_input_tokens": 40000})
+    _claude_succeeds(gate, dict(_CLAUDE_RESULT, usage=usage))
+    gate(STEP_RUNNERS, primary=primary)
+    gate(STEP_AUDIT, primary=primary)
+    verdict = gate(STEP_VERDICT, primary=primary)
+    assert verdict.returncode == 0, verdict.stderr
+    # cache_write_1h_mtok is 6 on claude-sonnet-4-5's card.
+    expected = (30 * 3 + 3327061 * 0.3 + 2377 * 3.75 + 40000 * 6 + 11822 * 15) / 1_000_000
+    assert f"| 42377 | {expected:.4f} |" in gate.summary_file.read_text()
+
+
 def _judge(gate, result_text):
     """Seed audit.json with a chosen result and run the verdict step over it."""
     primary = f"anthropic/{PRIMARY_BARE_KEY}"
@@ -527,8 +600,9 @@ def test_failover_preserves_the_interrupted_attempts_output_bundle(gate):
     # A primary that writes a full bundle (envelope plus a provider's
     # intermediates) then dies must have every piece preserved under
     # audit-first.* before the fallback reuses the audit.json* names, so the
-    # failed first attempt stays debuggable. The claude stub here stands in for
-    # a codex/gemini primary by leaving .events/.raw beside its envelope.
+    # failed first attempt stays debuggable. The claude stub here also stands
+    # in for a codex primary by leaving .events beside its envelope; its own
+    # stdout is the .raw the claude branch keeps.
     primary = f"anthropic/{PRIMARY_BARE_KEY}"
     fallback = f"openai/{FALLBACK_BARE_KEY}"
     _write_stub(
@@ -536,7 +610,6 @@ def test_failover_preserves_the_interrupted_attempts_output_bundle(gate):
         "claude",
         f'[ "$ANTHROPIC_API_KEY" = "{PRIMARY_BARE_KEY}" ] || {{ echo "wrong key" >&2; exit 99; }}\n'
         'printf "partial events\\n" > audit.json.events\n'
-        'printf "partial raw\\n" > audit.json.raw\n'
         'printf "Q1 settled\\n" > audit-progress.md\n'
         'printf "{\\"result\\":\\"partial\\"}\\n"\n'
         'echo "stub claude: dying after partial output" >&2\n'
@@ -545,7 +618,7 @@ def test_failover_preserves_the_interrupted_attempts_output_bundle(gate):
     gate(STEP_RUNNERS, primary=primary, fallback=fallback, fb_model="gpt-test")
     gate(STEP_AUDIT, primary=primary, fallback=fallback, fb_model="gpt-test")
     assert (gate.work / "audit-first.json.events").read_text() == "partial events\n"
-    assert (gate.work / "audit-first.json.raw").read_text() == "partial raw\n"
+    assert (gate.work / "audit-first.json.raw").read_text() == '{"result":"partial"}\n'
     assert json.loads((gate.work / "audit-first.json").read_text())["result"] == "partial"
     # The fallback's fresh output owns the audit.json* names.
     assert json.loads((gate.work / "audit.json").read_text())["result"]

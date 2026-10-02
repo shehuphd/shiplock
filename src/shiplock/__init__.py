@@ -1,15 +1,16 @@
 """Shiplock: deterministic docs-vs-code release checks.
 
 The public surface is small on purpose. Most callers want either the CLI
-(``shiplock check`` / ``shiplock prompt`` / ``shiplock needs-import``) or the two entry points re-exported
-here: load a repo's config, then run the checks over it.
+(``check``, ``scan``, ``judge``, ``init``, ``rules``, ``prompt``, ``needs-import``)
+or the two entry points re-exported here: load a repo's config, then run the
+checks over it.
 """
 
 from shiplock._config import Config, ConfigError, load_config
 from shiplock._report import Finding, Notice, Report
 from shiplock._checks import run_checks
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 __all__ = [
     "Config",

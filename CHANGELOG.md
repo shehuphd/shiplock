@@ -3,6 +3,49 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
+## [0.10.0] - 2026-10-02
+
+### Added
+- Two deterministic checks behind a new `[anchors]` section. `doc-anchors`:
+  every flag, env var, and config key a public doc names in backticks is
+  declared somewhere in the code, with `[anchors].exempt` for tokens
+  another tool owns. `doc-defaults`: a default a doc states for a flag
+  matches the parser's literal `default=`, with a small phrasing table.
+  Both read a new symbol index over the repo's source (Python through
+  `ast`, other languages by regex).
+- `shiplock judge`, a third layer between the checks and the agent audit:
+  typed questions to a judgment model, TypeSafe's Jev first, through a
+  provider registry and one `urllib` POST. Coverage asks whether the docs
+  describe each flag, command, and env var the code declares; an item no
+  doc describes is a warning with its code location, and `[judge].undocumented` lists what
+  stays out on purpose. Claim questions ask whether the code behind a doc
+  sentence's anchors supports it; those answers never fail a run and are
+  written with `--out` as leads. `--audit-output FILE` holds an agent
+  audit's output against the repo: the verdict line, the paths it cites,
+  and whether the verdict follows from the findings. Every run pre-flights
+  the key, records spend per call, and reports a resolved model other than
+  the pinned one as a finding. The key comes from `TYPESAFE_API_KEY` or
+  `JUDGE_API_KEY` (`provider/key`), never from an argument.
+- `shiplock prompt audit --judgments FILE` (and `ablation`) appends a judge
+  result's leads, uncovered code surface, and unanchored counts to the prompt as
+  items for the agent to verify first.
+- Two eval harnesses in `scripts/`, `judge_eval.py` and
+  `judge_fact_eval.py`, which set the judge's scope: across five repos,
+  sentence-level judgment of doc prose against code excerpts caught too few
+  contradictions at any threshold that kept false fails low, while coverage
+  questions flagged every undocumented flag. So the judge gates on nothing
+  the model says about a sentence; the checks that gate stay deterministic.
+
+### Fixed
+- The release gate's usage line and job-summary table under-reported input
+  on an Anthropic key: the CLI reports cache reads and cache writes beside
+  `input_tokens`, so a run that read 3.3M cached tokens showed as 30 in.
+  Input is now the whole prompt on every provider. The cost column, which
+  showed `n/a` for a run pinned to an alias such as `sonnet`, now prices on
+  the model id the CLI billed, charges 1-hour cache writes at their own
+  rate, and falls back to the CLI's own cost figure, marked as such, when
+  rates has no card for the model.
+
 ## [0.9.0] - 2026-10-02
 
 ### Added
@@ -315,6 +358,12 @@ semantic versioning.
   a GitHub Release is published, behind a reviewer-gated environment.
 - Shiplock as consumer zero: its own `shiplock.toml`, run over the shiplock repo.
 
+[0.10.0]: https://github.com/shehuphd/shiplock/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/shehuphd/shiplock/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/shehuphd/shiplock/compare/v0.7.1...v0.8.0
+[0.7.1]: https://github.com/shehuphd/shiplock/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/shehuphd/shiplock/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/shehuphd/shiplock/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/shehuphd/shiplock/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/shehuphd/shiplock/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/shehuphd/shiplock/compare/v0.3.0...v0.3.1

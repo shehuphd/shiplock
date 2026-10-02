@@ -9,7 +9,7 @@ on:
     inputs:
       audit-effort:
         description: >-
-          Claude's reasoning effort for this dispatch's audit run (low,
+          The audit's reasoning effort for this dispatch, mapped per adapter (low,
           medium, high, xhigh, max). Defaults to high as of 2026-09-03: in
           a planted-defect comparison on this repo, low and medium each
           found three of five seeded doc defects while high found all five

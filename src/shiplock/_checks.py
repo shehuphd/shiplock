@@ -169,6 +169,171 @@ def check_internal_refs(config: Config) -> CheckResult:
     return findings, notices
 
 
+_ANCHOR_KINDS = {
+    "flag": re.compile(r"^--[a-z][\w-]*$"),
+    "env var": re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$"),
+    "config key": re.compile(r"^\[[\w-]+\]\.[\w-]+$"),
+}
+_DEFAULT_PHRASES = {
+    "the current directory": ".",
+    "current directory": ".",
+    "cwd": ".",
+    "none": None,
+    "nothing": None,
+    "empty": "",
+    "unset": None,
+}
+
+
+def _anchors_index(config: Config):
+    """The symbol index over the repo's tracked source, minus the docs."""
+    from shiplock._symbols import build_index
+
+    tracked = git_tracked_files(config.root)
+    if tracked is None:
+        return None
+    docs = set(config.docs.public) if config.docs else set()
+    return build_index(config.root, tracked, docs)
+
+
+def check_doc_anchors(config: Config) -> CheckResult:
+    """Every flag, env var, and config key a public doc names exists in the code.
+
+    A backticked token shaped like one of those either resolves in the
+    symbol index (a parser declares the flag, the code reads the env var, a
+    parser reads the key) or appears as a string literal somewhere in the
+    source; otherwise the doc names something the code doesn't have. Tokens
+    in ``[anchors].exempt`` are another tool's and are skipped.
+    """
+    name = "doc-anchors"
+    if config.anchors is None:
+        return [], [Notice(name, "no [anchors] declared; skipped")]
+    if config.docs is None or not config.docs.public:
+        return [], [Notice(name, "no [docs].public declared; skipped")]
+    index = _anchors_index(config)
+    if index is None:
+        return [], [Notice(name, "not a git repo, or git unavailable; skipped")]
+
+    exempt = set(config.anchors.exempt)
+    findings: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+    for rel in config.docs.public:
+        text = _read_text(config.root / rel)
+        if text is None:
+            continue
+        for i, line in _prose_lines(text):
+            for token in _BACKTICKED.findall(line):
+                token = token.strip()
+                kind = next((k for k, pat in _ANCHOR_KINDS.items() if pat.match(token)), None)
+                if kind is None or token in exempt or (rel, token) in seen:
+                    continue
+                if _anchor_resolves(index, kind, token):
+                    continue
+                seen.add((rel, token))
+                findings.append(
+                    Finding(
+                        name,
+                        f"{kind} `{token}` isn't declared anywhere in the code "
+                        f"(rename it, or list it in [anchors].exempt if it belongs to another tool)",
+                        path=rel,
+                        line=i,
+                    )
+                )
+    return findings, []
+
+
+def _anchor_resolves(index, kind: str, token: str) -> bool:
+    if index.lookup(token):
+        return True
+    if kind == "env var":
+        return token in index.env_vars or index.has_literal(token)
+    if kind == "config key":
+        return index.has_literal(token.split("].")[1])
+    return index.has_literal(token)
+
+
+_BACKTICKED = re.compile(r"`([^`\n]{1,80})`")
+_STATED_DEFAULT = re.compile(
+    r"`(?P<flag>--[a-z][\w-]*)`[^.`]{0,60}?\bdefaults? (?:to|is) `?(?P<value>[^`.,;)]+?)`?(?=[.,;)]|\s(?:when|if|unless|so|and|or)\b|$)"
+    r"|`(?P<flag2>--[a-z][\w-]*)`[^.`]{0,60}?\(default:? `?(?P<value2>[^`)]+?)`?\)"
+)
+
+
+def _prose_lines(text: str):
+    """(line number, line) for lines outside fenced code blocks."""
+    in_fence = False
+    for i, line in enumerate(text.splitlines(), start=1):
+        if line.strip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            yield i, line
+
+
+def check_doc_defaults(config: Config) -> CheckResult:
+    """A default a public doc states for a flag matches the parser's literal.
+
+    Reads "`--flag` defaults to V" and "`--flag` (default: V)" from the docs
+    and compares V with the ``default=`` the argparse call gives that flag,
+    after a small phrasing table ("the current directory" is ``.``). A flag
+    whose parser default isn't a literal, or that has none, isn't compared.
+    """
+    name = "doc-defaults"
+    if config.anchors is None or not config.anchors.defaults:
+        return [], [Notice(name, "no [anchors] declared, or [anchors].defaults is false; skipped")]
+    if config.docs is None or not config.docs.public:
+        return [], [Notice(name, "no [docs].public declared; skipped")]
+    index = _anchors_index(config)
+    if index is None:
+        return [], [Notice(name, "not a git repo, or git unavailable; skipped")]
+    if not index.flags:
+        return [], [Notice(name, "the code declares no argparse flags; skipped")]
+
+    findings: list[Finding] = []
+    for rel in config.docs.public:
+        text = _read_text(config.root / rel)
+        if text is None:
+            continue
+        for i, line in _prose_lines(text):
+            for m in _STATED_DEFAULT.finditer(line):
+                flag = m.group("flag") or m.group("flag2")
+                stated = (m.group("value") or m.group("value2") or "").strip()
+                declared = [f for f in index.flags.get(flag, []) if f.has_default]
+                if not declared:
+                    continue
+                actual = declared[0].default
+                if not isinstance(actual, (str, int, float, bool)) and actual is not None:
+                    continue
+                if _defaults_agree(stated, actual):
+                    continue
+                findings.append(
+                    Finding(
+                        name,
+                        f"`{flag}` is documented as defaulting to {stated!r}, but the parser's default is {actual!r}",
+                        path=rel,
+                        line=i,
+                    )
+                )
+    return findings, []
+
+
+def _defaults_agree(stated: str, actual: object) -> bool:
+    s = stated.strip().strip("\"'")
+    if s.lower() in _DEFAULT_PHRASES:
+        s_value = _DEFAULT_PHRASES[s.lower()]
+        return s_value == actual or (s_value is None and actual in (None, "", False))
+    if actual is None:
+        return s.lower() in ("none", "nothing", "unset", "")
+    if isinstance(actual, bool):
+        return s.lower() == str(actual).lower()
+    if isinstance(actual, (int, float)):
+        try:
+            return float(s) == float(actual)
+        except ValueError:
+            return False
+    return s == str(actual) or s.rstrip("/") == str(actual).rstrip("/")
+
+
 def check_readme_links(config: Config) -> CheckResult:
     """Assert every markdown link in the README is absolute."""
     name = "readme-links"
@@ -1034,6 +1199,8 @@ _CHECKS = (
     check_banned_words,
     check_internal_refs,
     check_readme_links,
+    check_doc_anchors,
+    check_doc_defaults,
     check_scan,
     check_version,
     check_architecture,

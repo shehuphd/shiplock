@@ -511,7 +511,8 @@ def test_rules_add_refuses_a_commented_file_unless_rewrite(tmp_path, write_file,
     _init_git(repo, write_file, "README.md", "x\n")
     write_file(repo, "shiplock.local.toml", "# hand-written\ncode_names = []\n")
     assert main(["rules", "--path", str(repo), "add", "folder", "drafts"]) == EXIT_USAGE
-    assert "--rewrite" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "--rewrite" in err and "refs = [{ label = 'drafts/'" in err
     assert main(["rules", "--path", str(repo), "add", "folder", "drafts", "--rewrite"]) == EXIT_OK
 
 
@@ -600,3 +601,29 @@ def test_mistyped_command_suggests_init_and_rules(capsys):
     with pytest.raises(SystemExit):
         main(["rulez"])
     assert "Perhaps you meant 'shiplock rules'" in capsys.readouterr().err
+
+
+def test_judge_without_a_key_is_a_usage_error(tmp_path, write_file, monkeypatch, capsys):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.delenv("JUDGE_API_KEY", raising=False)
+    _init_git(tmp_path, write_file, "README.md", "x\n")
+    assert main(["judge", str(tmp_path)]) == EXIT_USAGE
+    assert "no key" in capsys.readouterr().err
+
+
+def test_judge_rejects_an_unknown_provider_prefix(tmp_path, write_file, monkeypatch, capsys):
+    monkeypatch.setenv("JUDGE_API_KEY", "chatty/abc")
+    _init_git(tmp_path, write_file, "README.md", "x\n")
+    write_file(tmp_path, "shiplock.toml", '[docs]\npublic = ["README.md"]\n[judge]\nprovider = "chatty"\n')
+    assert main(["judge", str(tmp_path)]) == EXIT_USAGE
+    assert "isn't a judgment provider" in capsys.readouterr().err
+
+
+def test_prompt_with_judgments_appends_the_leads(tmp_path, capsys):
+    path = tmp_path / "j.json"
+    path.write_text(json.dumps({"leads": [{"doc": "USAGE.md", "line": 7, "text": "a claim", "pick": "contradicted", "p_contradicted": 0.9}],
+                                "coverage": [], "unanchored": {}, "refused": []}), encoding="utf-8")
+    assert main(["prompt", "audit", "--judgments", str(path)]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "AUDIT: PASS" in out and "Judge results to verify first" in out and "USAGE.md:7" in out
+    assert main(["prompt", "--judgments", str(tmp_path / "missing.json")]) == EXIT_USAGE

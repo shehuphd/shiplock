@@ -136,6 +136,8 @@ you want more coverage — nothing forces you to fill in the rest.
 | `[deps]` | `deps-declared-once` (requirements files vs pyproject) | duplicate dependency declarations aren't checked |
 | `[tests]` | `test-assertions` (every test carries an expectation) | assertion-free tests aren't checked |
 | `[scan]` | committed patterns (`refs`), the rules files to read, excludes, and the secrets switch for `scan` | `scan` still runs with your rules files alone, and skips with a notice when there are none |
+| `[anchors]` | `doc-anchors` (every flag, env var, and config key a doc names exists in the code) and `doc-defaults` (a stated flag default matches the parser's) | neither runs |
+| `[judge]` | `shiplock judge`: which docs it judges, what code surface stays undocumented on purpose, the provider and model | `judge` uses `[docs].public` and the defaults |
 
 ### The complete config, annotated
 
@@ -195,6 +197,16 @@ exempt = []                  # names allowed in both places
 globs = ["tests/**/*.py"]
 exempt = []                  # test names, or "path::test_name", allowed without one
 
+[anchors]                    # optional: doc-anchors and doc-defaults
+exempt = ["--no-verify"]      # tokens another tool owns; the docs may name them
+defaults = true              # compare stated flag defaults with the parser's
+
+[judge]                      # optional: the model-judged layer (shiplock judge)
+docs = []                    # docs to judge; empty means [docs].public
+undocumented = []            # flags, commands, env vars kept out of the docs on purpose
+provider = "typesafe"        # the judgment provider
+model = "jev-1.13.0"         # pinned; a different resolved model is a finding
+
 [scan]                       # optional: the leak & internal-reference scan
 # Repo-level gitignored rules files to read. Omit to read shiplock.local.toml
 # at the repo root. Your own user-level rules file is read either way. A rules
@@ -211,7 +223,7 @@ refs = [
 
 ## The checks
 
-Twelve deterministic checks, run in this order:
+Fourteen deterministic checks, run in this order:
 
 | Check | Asserts |
 |---|---|
@@ -219,7 +231,9 @@ Twelve deterministic checks, run in this order:
 | `banned-words` | The words in `[style].banned` (word-boundary, case-insensitive) are absent from public docs and the configured source globs. The changelog is swept only above its first released-version heading. Skips with a notice when no words are declared. |
 | `internal-refs` | No declared internal-reference pattern matches in public docs. Patterns come from `[scan].refs` and your rules files; shiplock ships none, and skips with a notice when there are none. |
 | `readme-links` | Every markdown link in the README is absolute (`http`, `https`, `#`, or `mailto`), since PyPI resolves relative links against pypi.org. |
-| `scan` | Over the git-tracked files (`git ls-files`), not only the declared docs: the same internal-reference patterns, plus the code-names, home usernames, and personal emails in your rules files. Private labels and matches are masked in the output. Runs when `[scan]` is declared; the `shiplock scan` command runs it directly on any repo. See below. |
+| `doc-anchors` | Every flag (two leading dashes), env var (upper case with underscores), and config key (`[section].key` form) a public doc names in backticks is declared somewhere in the code: an argparse call, an `os.environ` read, a parser reading the key, or a string literal. A token another tool owns goes in `[anchors].exempt`. Fenced code is skipped. |
+| `doc-defaults` | A default a public doc states for a flag, in the forms "flag defaults to V" and "flag (default: V)", matches the literal `default=` the argparse call gives it, after a small phrasing table ("the current directory" is `.`). Flags with no literal default aren't compared. `[anchors].defaults = false` turns it off. |
+| `scan` | Over the git-tracked files (`git ls-files`), not only the declared docs, whenever any rules exist, with or without `[scan]`: the same internal-reference patterns, plus the code-names, home usernames, and personal emails in your rules files. Private labels and matches are masked in the output. Runs whenever any rules exist; the `shiplock scan` command runs it directly on any repo. See below. |
 | `version` | The pyproject version equals the package's `__version__`, and the changelog carries a heading for that version or an `[Unreleased]` section. |
 | `architecture` | Every top-level module and subpackage under the source directory is named in the architecture doc, or listed as exempt. |
 | `coverage` | Every member of a declared object appears in its declared doc. Three kinds: `enum` (member names), `params` (a callable's parameter names), `exports` (a module's `__all__`). |
@@ -277,6 +291,11 @@ Where each command writes, unless `--user` or `--repo` says otherwise:
 | `allow` | the repo's `shiplock.local.toml` | What a repo contains on purpose is specific to it |
 | `remove` | whichever file holds the entry | |
 
+Every `rules` subcommand takes `--path REPO` before the subcommand to work on
+another repo (`shiplock rules --path ../other add folder drafts/`); the
+default is the current directory. `push-secret` also takes `--rules PATH`,
+repeatable, to fold an extra rules file into the secret.
+
 `folder` and `file` build the pattern: `drafts/` matches `drafts/`, `./drafts/`,
 and `repo/drafts/x` but not `@acme-drafts/` or `my_drafts/`; a dot folder
 like `.notes` gets the form that skips domains such as `platform.notes.com`;
@@ -291,7 +310,8 @@ prints the entry to add yourself, and exits 2; `--rewrite` lets it proceed.
 A file shiplock wrote carries only its own header, which the writer keeps.
 
 `shiplock rules suggest` (which `init` also runs) lists the folders git
-ignores in this repo and the files a `.gitignore` line names outright, minus
+ignores in this repo and the files a `.gitignore` or `.git/info/exclude`
+line names outright, minus shiplock's own files, minus
 tool output such as `node_modules/` or `.venv/` and minus anything a rule
 already covers, with how many tracked files name each. Nothing is written
 until you run the `add` command it prints. Git only reports ignored folders
@@ -511,11 +531,55 @@ environment variable turns color off everywhere. Usage mistakes get a sentence,
 not a parser dump: a mistyped command is answered with the valid commands and,
 when one is close enough, a "Perhaps you meant" suggestion.
 
+## The judge
+
+Between the deterministic checks and the agent audit there's a third layer:
+typed questions to a judgment model, which answers each with a probability
+and generates no text. It runs only when invoked, and it's billable:
+
+```bash
+export TYPESAFE_API_KEY=...        # or JUDGE_API_KEY=typesafe/...
+shiplock judge                     # coverage warnings and claim leads
+shiplock judge --out judge.json    # keep the full result for the audit
+shiplock judge --no-leads          # coverage only
+shiplock judge --audit-output audit.md   # also check an agent audit's output
+```
+
+It asks two kinds of question:
+
+- **Coverage.** For every CLI flag, command, and environment variable the
+  code declares (from the same symbol index the anchor checks use), does any
+  judged doc describe it? An item no doc describes prints as a warning with
+  its code location. Surface that stays undocumented on purpose goes in
+  `[judge].undocumented`.
+- **Claims.** For every doc sentence that names something the index
+  resolves, does the code behind those names support the sentence? These
+  answers never fail a run. They're leads: with `--out`, they go into the
+  JSON result, and `shiplock prompt audit --judgments judge.json` appends
+  them to the audit prompt as items for the agent to confirm or overturn
+  first. The eval that set this scope is described in the changelog; a
+  sentence judged against a code excerpt is a place to look, not a verdict.
+
+With `--audit-output FILE`, it also holds an agent audit's output against
+the repo: the verdict line is present, every path it cites is a tracked
+file, and (as judgments) the verdict follows from the findings and the
+findings name specific places. A missing verdict, an untracked path, or a
+verdict that doesn't follow is a finding.
+
+Every run ends with an info notice: calls made, input tokens, claims judged,
+sentences it couldn't anchor to code. The pinned model is compared with the
+one the provider reports; a different one is a finding. The key comes from
+`TYPESAFE_API_KEY`, or `JUDGE_API_KEY` in `provider/key` form, never from
+an argument. Exit codes match `shiplock check`. The judge sends the judged
+docs and the code excerpts behind their anchors to the provider; both are
+git-tracked public content.
+
 ## The semantic audit
 
-`shiplock check` covers what a machine can decide with certainty. The second
-layer is a prompt for a fresh agent to read the code and hold every doc claim
-against it, from state rather than from what changed. Print it with:
+`shiplock check` covers what a machine can decide with certainty, and the
+judge adds warnings and leads. The third layer is a prompt for a fresh agent
+to read the code and hold every doc claim against it, from state rather than
+from what changed. Print it with:
 
 ```bash
 shiplock prompt
@@ -573,9 +637,15 @@ which fails closed). Each audit's token usage — input, output, cache traffic,
 and a cost in USD priced by [rates](https://pypi.org/project/rates/) from the
 attempt's own provider and model — is written to the run's job summary, and to
 the issue footer when one is opened, so the gate's spend stays visible per run.
-The price comes from rates' bundled offline snapshot (no extra network call);
-an attempt on a model rates doesn't carry a price for shows `n/a` rather than
-guessing.
+Input is the whole prompt on every provider, cached tokens included; the cache
+read and cache write columns are parts of it. Anthropic reports those three
+parts beside each other, so the gate adds them up before the table. The price
+comes from rates' bundled offline snapshot (no extra network call), keyed on
+the model id the CLI billed when it reports one (a run pinned to an alias such
+as `sonnet` is priced on the dated id behind it), with 1-hour cache writes at
+their own rate. When rates carries no price for the model, the cell shows the
+CLI's own cost figure marked `CLI-reported` if the CLI gives one, and `n/a`
+otherwise.
 
 The workflow's inputs:
 

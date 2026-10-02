@@ -47,6 +47,17 @@ requirements = ["requirements*.txt", "tools/requirements*.txt"]
 [tests]
 globs = ["tests/**/*.py"]
 
+[anchors]
+# Every flag, env var, and config key a public doc names must exist in the
+# code, and a stated flag default must match the parser's. Tokens another
+# tool owns are exempt.
+exempt = ["--dangerously-bypass-approvals-and-sandbox"]
+
+[judge]
+# The model-judged layer (shiplock judge): doc coverage warnings and claim
+# leads for the audit. Billable; runs only when invoked.
+undocumented = []
+
 [scan]
 # Scan the git-tracked set. Private rules (internal-reference patterns, code-
 # names, identities) live in the gitignored shiplock.local.toml, read by
