@@ -3,6 +3,60 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
+## [0.8.0] - 2026-10-02
+
+### Changed (breaking)
+- shiplock ships no rules. The built-in banned-word list is gone: declare the
+  words you ban in `[style].banned`, and a repo that declares none gets a skip
+  notice from `banned-words`. The built-in internal-reference patterns are
+  gone too: `internal-refs` and `scan` enforce only the patterns you declare,
+  and skip with a notice when there are none. USAGE carries a starter rules
+  block to copy.
+- `[scan].extra_refs` is now `[scan].refs`, and `[style].extra_banned` is now
+  `[style].banned`. The old names still load for this release with a
+  deprecation warning; setting both an old name and its new one is a
+  `ConfigError`.
+- `code_names`, `home_usernames`, `emails`, and `allow` in `[scan]` are a
+  `ConfigError`: they belong in a gitignored rules file, since committing them
+  publishes them.
+
+### Added
+- Rules files: gitignored TOML files holding `refs`, `code_names`,
+  `home_usernames`, `emails`, and `allow`. shiplock reads `shiplock.local.toml`
+  at the repo root by default, or the files `[scan].blocklist` names. A
+  missing or malformed named file prints a notice; a rules file that git
+  tracks is a finding.
+- A user rules file, read in every repo with no config:
+  `$XDG_CONFIG_HOME/shiplock/rules.toml` (`~/.config` when unset), or
+  `%APPDATA%\shiplock\rules.toml` on Windows. `SHIPLOCK_USER_RULES` names
+  a different file; `SHIPLOCK_NO_USER_RULES=1` skips it. When it contributes
+  rules, the scan says how many in an info notice.
+- The `scan` check runs inside `shiplock check` whenever any rules exist,
+  with or without a `[scan]` section, and skips with a notice when none do.
+- `shiplock scan --staged` scans the added lines of the staged diff, for a
+  pre-commit hook. `shiplock scan --range REVS` scans the added lines and
+  commit messages of a commit range (any `git rev-list` expression), for a
+  pre-push hook, so a name committed and removed again before the push is
+  still caught.
+- `--rules PATH` on `check` and `scan`, repeatable, to pass a rules file from
+  anywhere.
+- `allow` in a rules file exempts entries a repo contains on purpose, across
+  every rule class. An entry is a bare string, allowed anywhere, or a table
+  with `value` and `paths` (repo-relative globs; a trailing slash names a
+  folder) that allows it only there. Allowed matches never fail the run;
+  each allowed entry that matched prints one masked warning with its count
+  and files. A match outside an entry's paths is a finding that names the
+  allowed paths, and a glob matching no tracked file is a warning.
+- An optional `SHIPLOCK_RULES` secret on the reusable gate. The `check` job
+  writes it to a runner-temp file, passes it with `--rules`, and deletes it,
+  so private rules apply in CI without being committed.
+- `Notice.kind`: `"skip"` for a check that didn't run, `"warning"` for an
+  allowed match or a deprecated key, `"info"` for context such as where the
+  rules came from. The CLI renders each by its kind, and `--json` includes
+  it.
+- Private pattern labels print masked; labels from `shiplock.toml` print in
+  full. `shiplock.toml` never flags its own `[scan].refs` declarations.
+
 ## [0.7.1] - 2026-09-20
 
 ### Fixed

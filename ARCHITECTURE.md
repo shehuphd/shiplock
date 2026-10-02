@@ -64,6 +64,8 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
 | Malformed `shiplock.toml` | `ConfigError`, rendered as one plain sentence on stderr; exit 2. A missing file isn't an error: `check` runs the default pass |
 | A check finds a docs-vs-code disagreement | `Finding` on stdout; exit 1 |
 | A check's prerequisite is absent (no git tag, package won't import, glob matches nothing) | `Notice` on stderr naming the reason and fix; the run continues, and a skip is never a silent pass |
+| A rules file is missing, unreadable, or holds an unknown key or a bad regex | A `Notice` naming the file; the rest of the rules still apply. A rules file that git tracks is a `Finding` |
+| `scan --range` gets a range git can't resolve | A `Notice`; nothing is scanned, and the hook that passed it sees exit 0, so the hook script is what must pass a valid range |
 | A swept file is unreadable or not valid UTF-8 | Read leniently or skipped by `_read_text`; ASCII patterns still match |
 | The CI audit dies mid-run | The fallback key's attempt continues from the audit's progress log where the interrupted adapter could write one (Claude, Codex); a Gemini primary has no write tool, so its fallback restarts. A missing verdict line fails closed |
 | No audit key secret configured in CI | The audit is skipped with a workflow warning; the deterministic checks still gate the run |
@@ -93,8 +95,12 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
   issue-on-failure step, and trusted publishing all assume GitHub.
 - `versioned-files` and `manifest` depend on the `git` CLI and a reachable
   tag; without either, they skip with a notice instead of checking.
-- The `internal-refs` pattern set is fixed; a repo with a differently named
-  internal folder needs the pattern list widened before the check sees it.
+- shiplock ships no banned words and no internal-reference patterns; a repo
+  that declares none gets a skip notice from `banned-words`, `internal-refs`,
+  and `scan`. Private rules reach CI only through the `SHIPLOCK_RULES` secret,
+  which a fork's pull request can't read.
+- `scan --range` reads each commit's diff against its first parent, so a
+  merge commit's own conflict resolution isn't scanned.
 
 ## Project structure
 
@@ -158,9 +164,9 @@ shiplock check
 | `_compat` | Version-guarded imports in one place: `tomllib` from the standard library on 3.11+, the `tomli` backport on 3.10. |
 | `_config` | Reads `shiplock.toml`, validates it, and returns a frozen `Config` of typed sections. Raises `ConfigError` on an unknown top-level section, a wrong-typed value, or a section missing a required field. |
 | `_checks` | Holds the twelve check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
-| `_report` | Defines `Finding` (a disagreement), `Notice` (a skip with a reason), and `Report` (both, plus `ok`). |
-| `_style` | Defines the house banned-word list and the word-boundary matcher. Carved out of shiplock's own sweep, since it has to name the words. |
-| `_scan` | Runs the leak & internal-reference scan over the git-tracked set: shared ref-patterns, a local gitignored blocklist for the identity classes, masked output, and an opt-in secret switch. |
+| `_report` | Defines `Finding` (a disagreement), `Notice` (a skip or a warning, with its reason), and `Report` (both, plus `ok`). |
+| `_style` | The word-boundary banned-word matcher over the words a repo declares in `[style].banned`. Ships no word list. |
+| `_scan` | Loads the rules (the user's per-machine file, committed `[scan].refs`, gitignored repo rules files, `--rules` files), then runs the leak & internal-reference scan in one of three modes: the git-tracked set, the staged diff, or a commit range's added lines and messages. One line scanner serves all three: ref patterns, the identity classes, path-scoped `allow` with masked counts, and an opt-in secret switch. |
 | `_introspect` | Reads a package's `__version__`, `__all__`, enum members, and callable signatures in a subprocess that binds `sys.path` to the checked root, so `version` and `coverage` never read a stale installed copy. |
 
 ## The check registry
@@ -220,7 +226,9 @@ CI lives in `.github/workflows/`:
   Gemini primary, run without a write tool, restarts on the fallback instead.
   With no key secret set at all, the audit
   is skipped with a warning and the deterministic checks still gate the run.
-  Any repo consumes it with
+  An optional `SHIPLOCK_RULES` secret carries a rules file's contents: the
+  `check` job writes it to a runner-temp file, passes it with `--rules`, and
+  deletes it. Any repo consumes it with
   `uses: shehuphd/shiplock/.github/workflows/gate.yml@main`.
 - `tests.yml` — the pytest suite across Python 3.10 through 3.13, plus a
   `mutation` job that runs `scripts/mutation_check.py`.
@@ -258,17 +266,20 @@ can't pass unnoticed. The gate workflow's shell orchestration is tested too:
 `tests/test_gate.py` extracts the audit job's step scripts from `gate.yml`
 itself and runs them against stub agent CLIs, covering key validation, the
 missing-key skip, the cross-provider failover continuation, and the
-rates-priced usage table.
+rates-priced usage table, plus the `check` job's `SHIPLOCK_RULES` step.
 
 ## Future considerations
 
-Known debt only, not a roadmap. The `internal-refs` pattern set is fixed; a repo
-with a differently-named internal folder would need the pattern list widened.
+Known debt only, not a roadmap. A rules file supplied through the
+`SHIPLOCK_RULES` secret is one TOML file, so a repo with several local rules
+files merges them by hand before storing the secret.
 
 ## Glossary
 
 | Term | Meaning |
 |---|---|
 | Finding | A concrete disagreement between a doc and the code. Fails the run. |
-| Notice | A check that didn't run, with the reason stated. Doesn't fail the run. |
+| Notice | A check that didn't run (`skip`), a warning such as an allowed match or a deprecated key (`warning`), or context such as where the rules came from (`info`). Doesn't fail the run. |
+| Rules file | A gitignored TOML file of private scan rules: `refs`, `code_names`, `home_usernames`, `emails`, `allow`. The user file is one per machine, read in every repo; a repo file is `shiplock.local.toml` at its root. |
+| Scope | The path globs an `allow` entry is allowed under; an entry with none is allowed anywhere. |
 | Consumer zero | Shiplock checking itself with the package it ships. |

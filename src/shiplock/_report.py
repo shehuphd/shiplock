@@ -1,9 +1,10 @@
 """Result types produced by a check run.
 
 A check emits ``Finding`` objects (a doc surface disagrees with the code) and
-``Notice`` objects (a check was skipped because its surface isn't declared, or
-couldn't run for a stated reason). The distinction is load-bearing: a skip is
-never a pass. A ``Report`` collects both and answers one question through
+``Notice`` objects: a skip (a check's surface isn't declared, or it couldn't run
+for a stated reason) or a warning (something to see that doesn't fail the run,
+such as an allowed match or a deprecated config key). The distinction is
+load-bearing: a skip is never a pass. A ``Report`` collects both and answers one question through
 ``ok`` — did anything fail?
 """
 
@@ -37,16 +38,20 @@ class Finding:
 
 @dataclass(frozen=True)
 class Notice:
-    """A check that didn't run, with the reason stated.
+    """Something the reader should see that doesn't fail the run.
 
-    Emitted when a check's surface isn't declared in config, or when a
-    prerequisite is absent (no git tag to diff against, an import that failed).
-    A notice keeps the run honest: the reader sees the check was skipped, not
-    that it passed.
+    ``kind`` is ``"skip"`` (the default) when a check didn't run: its surface
+    isn't declared, or a prerequisite is absent (no git tag to diff against, an
+    import that failed). A skip keeps the run honest: the reader sees the check
+    didn't run, not that it passed. ``kind`` is ``"warning"`` for something
+    from a check that did run and that the reader should look at, such as
+    matches against allowed entries or a deprecated config key, and ``"info"``
+    for plain context about the run, such as where its rules came from.
     """
 
     check: str
     message: str
+    kind: str = "skip"
 
 
 @dataclass

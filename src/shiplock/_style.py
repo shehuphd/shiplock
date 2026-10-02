@@ -1,52 +1,18 @@
-"""The house banned-word list and the matcher over it.
+"""The banned-word matcher.
 
-This module is the one carve-out from shiplock's own banned-word sweep: it has
-to name the forbidden words in order to check for them, so a repo checking
-itself excludes this file via ``[style].exclude``. Every repo's config can
-extend the list (``extra_banned``) or exempt a word (``allow``).
+shiplock ships no word list: each repo declares its own in ``[style].banned``
+and can exempt a word per repo with ``[style].allow``. A repo that declares no
+words gets a skip notice from the ``banned-words`` check, never a silent pass.
 
-Matching is word-boundary and case-insensitive, so an identifier like
-``realtime`` never trips on ``real`` and a header like ``Gaps`` is caught the
-same as ``gaps``.
+Matching is word-boundary and case-insensitive, so a banned word inside a
+longer identifier doesn't match, and a capitalised heading matches the same as
+lowercase prose.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-
-# The house banned-word list plus the inflections seen in live sweeps. Word-boundary
-# matching keeps substrings inside larger identifiers from false-positiving.
-BANNED_WORDS = frozenset(
-    {
-        "travel",
-        "matters",
-        "serious",
-        "intersection",
-        "quietly",
-        "exactly",
-        "genuine",
-        "genuinely",
-        "consistently",
-        "straightforward",
-        "worth",
-        "earn",
-        "earns",
-        "sits",
-        "sat",
-        "lands",
-        "landed",
-        "shapes",
-        "actually",
-        "land",
-        "shifts",
-        "gap",
-        "gaps",
-        "sharper",
-        "cleanly",
-        "real",
-    }
-)
 
 
 @dataclass(frozen=True)
@@ -57,13 +23,10 @@ class BannedHit:
     word: str
 
 
-def effective_words(
-    extra_banned: tuple[str, ...] = (), allow: tuple[str, ...] = ()
-) -> set[str]:
-    """The lowercase word set actually enforced, after extend and exempt."""
+def effective_words(banned: tuple[str, ...] = (), allow: tuple[str, ...] = ()) -> set[str]:
+    """The lowercase word set enforced: the declared words minus the exempt ones."""
     allow_lower = {w.lower() for w in allow}
-    words = {w.lower() for w in BANNED_WORDS} | {w.lower() for w in extra_banned}
-    return words - allow_lower
+    return {w.lower() for w in banned} - allow_lower
 
 
 def _compile(words: set[str]) -> re.Pattern[str] | None:
@@ -75,11 +38,11 @@ def _compile(words: set[str]) -> re.Pattern[str] | None:
 
 def find_banned(
     text: str,
-    extra_banned: tuple[str, ...] = (),
+    banned: tuple[str, ...] = (),
     allow: tuple[str, ...] = (),
 ) -> list[BannedHit]:
     """Return every banned-word hit in ``text``, one per occurrence, by line."""
-    pattern = _compile(effective_words(extra_banned, allow))
+    pattern = _compile(effective_words(banned, allow))
     if pattern is None:
         return []
     hits: list[BannedHit] = []

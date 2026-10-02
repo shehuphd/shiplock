@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import subprocess
 
+from conftest import starter_refs
 from shiplock._checks import (
     check_architecture,
     check_banned_words,
@@ -29,6 +30,7 @@ from shiplock._config import (
     DepsConfig,
     DocsConfig,
     ManifestConfig,
+    ScanConfig,
     StyleConfig,
     TestsConfig,
     VersionConfig,
@@ -60,10 +62,21 @@ def test_docs_exist_clean_when_present(tmp_path, write_file):
 
 # --- banned-words ---------------------------------------------------------
 
+WORDS = StyleConfig(banned=["real", "gaps", "sits"])
+
+
+def test_banned_words_skips_when_no_words_declared(tmp_path, write_file):
+    # shiplock ships no word list: nothing declared is a skip, never a pass.
+    write_file(tmp_path, "README.md", "this is real\n")
+    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
+    findings, notices = check_banned_words(config)
+    assert findings == []
+    assert any("no banned words declared" in n.message for n in notices)
+
 
 def test_banned_words_fires_in_a_public_doc(tmp_path, write_file):
     write_file(tmp_path, "README.md", "this is real\n")
-    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
+    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]), style=WORDS)
     findings, _ = check_banned_words(config)
     assert len(findings) == 1
     assert findings[0].line == 1
@@ -79,6 +92,7 @@ def test_banned_words_skips_released_changelog_section(tmp_path, write_file):
     config = Config(
         root=tmp_path,
         docs=DocsConfig(public=["CHANGELOG.md"], changelog="CHANGELOG.md"),
+        style=WORDS,
     )
     findings, _ = check_banned_words(config)
     assert findings == []
@@ -93,6 +107,7 @@ def test_banned_words_sweeps_unreleased_changelog_section(tmp_path, write_file):
     config = Config(
         root=tmp_path,
         docs=DocsConfig(public=["CHANGELOG.md"], changelog="CHANGELOG.md"),
+        style=WORDS,
     )
     findings, _ = check_banned_words(config)
     assert len(findings) == 1
@@ -100,7 +115,9 @@ def test_banned_words_sweeps_unreleased_changelog_section(tmp_path, write_file):
 
 def test_banned_words_fires_in_a_source_glob(tmp_path, write_file):
     write_file(tmp_path, "src/pkg/core.py", "# a real workhorse\n")
-    config = Config(root=tmp_path, style=StyleConfig(source_globs=["src/**/*.py"]))
+    config = Config(
+        root=tmp_path, style=StyleConfig(banned=["real"], source_globs=["src/**/*.py"])
+    )
     findings, _ = check_banned_words(config)
     assert len(findings) == 1
     assert findings[0].path == "src/pkg/core.py"
@@ -111,7 +128,7 @@ def test_banned_words_honors_exclude_glob(tmp_path, write_file):
     config = Config(
         root=tmp_path,
         style=StyleConfig(
-            source_globs=["src/**/*.py"], exclude=["src/pkg/_words.py"]
+            banned=["real"], source_globs=["src/**/*.py"], exclude=["src/pkg/_words.py"]
         ),
     )
     findings, notices = check_banned_words(config)
@@ -120,15 +137,23 @@ def test_banned_words_honors_exclude_glob(tmp_path, write_file):
     assert len(notices) == 1
 
 
-# --- internal-refs --------------------------------------------------------
-
-
 def test_banned_words_scans_non_utf8_file_without_crashing(tmp_path):
     # Invalid UTF-8 bytes must not raise; ASCII banned words still get caught.
     (tmp_path / "README.md").write_bytes(b"\xff\xfe this is real\n")
-    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
+    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]), style=WORDS)
     findings, _ = check_banned_words(config)
     assert any(f.message == "banned word 'real'" for f in findings)
+
+
+# --- internal-refs --------------------------------------------------------
+# The patterns are USAGE.md's published starter set (conftest.starter_refs),
+# declared as committed refs so their labels show in messages.
+
+
+def _refs_config(root, doc="README.md"):
+    return Config(
+        root=root, docs=DocsConfig(public=[doc]), scan=ScanConfig(refs=starter_refs())
+    )
 
 
 def test_internal_refs_skips_without_docs_section(tmp_path):
@@ -137,46 +162,24 @@ def test_internal_refs_skips_without_docs_section(tmp_path):
     assert len(notices) == 1
 
 
-def test_internal_refs_fires_on_project_folder(tmp_path, write_file):
-    write_file(tmp_path, "README.md", "see project/NOTES.md for details\n")
+def test_internal_refs_skips_when_no_patterns_declared(tmp_path, write_file):
+    # shiplock ships no patterns: nothing declared is a skip, never a pass.
+    write_file(tmp_path, "README.md", "see drafts/notes.md for details\n")
     config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
-    findings, _ = check_internal_refs(config)
-    assert len(findings) == 1
-
-
-def test_internal_refs_fires_on_coding_standards_file(tmp_path, write_file):
-    write_file(tmp_path, "README.md", "conventions live in CODING.md\n")
-    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
-    findings, _ = check_internal_refs(config)
-    assert len(findings) == 1
-
-
-def test_internal_refs_fires_on_roadmap(tmp_path, write_file):
-    write_file(tmp_path, "README.md", "planned in ROADMAP.md\n")
-    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
-    findings, _ = check_internal_refs(config)
-    assert len(findings) == 1
-
-
-def test_internal_refs_carves_out_pypi_project_url(tmp_path, write_file):
-    write_file(tmp_path, "README.md", "https://pypi.org/project/shiplock/\n")
-    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
-    findings, _ = check_internal_refs(config)
+    findings, notices = check_internal_refs(config)
     assert findings == []
+    assert any("no internal-reference patterns declared" in n.message for n in notices)
 
 
-def test_internal_refs_roadmap_is_case_sensitive(tmp_path, write_file):
-    # Uppercase ROADMAP is the file/label form and fires; prose "roadmap" doesn't.
-    write_file(tmp_path, "README.md", "our roadmap is public\n")
-    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
-    findings, _ = check_internal_refs(config)
-    assert findings == []
+def test_internal_refs_fires_on_declared_folder(tmp_path, write_file):
+    write_file(tmp_path, "README.md", "see drafts/notes.md for details\n")
+    findings, _ = check_internal_refs(_refs_config(tmp_path))
+    assert len(findings) == 1
 
 
 def test_internal_refs_fires_on_claude_dir(tmp_path, write_file):
     write_file(tmp_path, "README.md", "config lives in .claude/settings\n")
-    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
-    findings, _ = check_internal_refs(config)
+    findings, _ = check_internal_refs(_refs_config(tmp_path))
     assert len(findings) == 1
 
 
@@ -186,24 +189,14 @@ def test_internal_refs_fires_on_other_assistant_dirs(tmp_path, write_file):
         "README.md",
         "notes in .codex/plan.md, .grok/state, and .cursor/rules\n",
     )
-    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
-    findings, _ = check_internal_refs(config)
+    findings, _ = check_internal_refs(_refs_config(tmp_path))
     assert len(findings) == 3
 
 
 def test_internal_refs_ignores_claude_domain(tmp_path, write_file):
     # "platform.claude.com" is a domain, not the .claude assistant directory.
     write_file(tmp_path, "README.md", "get a key at platform.claude.com/keys\n")
-    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
-    findings, _ = check_internal_refs(config)
-    assert findings == []
-
-
-def test_internal_refs_ignores_coding_lookalike(tmp_path, write_file):
-    # "encoding.md" is not the coding-standards file.
-    write_file(tmp_path, "README.md", "see encoding.md for byte details\n")
-    config = Config(root=tmp_path, docs=DocsConfig(public=["README.md"]))
-    findings, _ = check_internal_refs(config)
+    findings, _ = check_internal_refs(_refs_config(tmp_path))
     assert findings == []
 
 

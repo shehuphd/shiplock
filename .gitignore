@@ -1,4 +1,4 @@
-# Internal planning: PRDs, design notes, roadmap, bug list.
+# Local working files, kept out of the repo.
 project/
 
 # Per-developer AI-assistant tool state.
@@ -20,3 +20,6 @@ dist/
 
 # Per-run test artifact (a fresh CSV each run; scrollback is not a record).
 .test-runs/
+
+# Local shiplock rules: private patterns and identities, never committed.
+shiplock.local.toml

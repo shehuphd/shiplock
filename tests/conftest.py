@@ -32,6 +32,16 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
         writer.writerows(sorted(_results))
 
 
+@pytest.fixture(autouse=True)
+def no_user_rules(monkeypatch):
+    """Keep the developer's own rules file out of every test run.
+
+    A test that exercises the user file deletes this variable and points
+    ``XDG_CONFIG_HOME`` (or ``SHIPLOCK_USER_RULES``) at a temp directory.
+    """
+    monkeypatch.setenv("SHIPLOCK_NO_USER_RULES", "1")
+
+
 @pytest.fixture
 def write_file():
     """Return a helper that writes text to ``root / relpath``, making parents."""
@@ -87,3 +97,23 @@ def git_repo(tmp_path):
     _run("config", "user.email", "test@example.com")
     _run("config", "user.name", "Test")
     return tmp_path
+
+
+# The starter rules USAGE.md publishes, between these two HTML comments. Tests
+# hold the published patterns directly, so the copy readers take from the docs
+# is the copy that's tested.
+STARTER_START = "<!-- starter-rules:start -->"
+STARTER_END = "<!-- starter-rules:end -->"
+
+
+def starter_refs():
+    """The ``refs`` in USAGE.md's starter rules block, as ``RefPattern``s."""
+    import re as _re
+
+    from shiplock._compat import tomllib
+    from shiplock._config import parse_ref_tables
+
+    usage = (Path(__file__).resolve().parent.parent / "USAGE.md").read_text(encoding="utf-8")
+    block = usage[usage.index(STARTER_START) : usage.index(STARTER_END)]
+    toml_text = _re.search(r"```toml\n(.*?)```", block, _re.DOTALL).group(1)
+    return parse_ref_tables(tomllib.loads(toml_text)["refs"], "USAGE starter refs")

@@ -64,7 +64,7 @@ section, is in
 Shiplock checks in two layers:
 
 1. **Deterministic checks** (`shiplock check`) — fast, exact, no model. Missing
-   docs, banned words, internal references in public docs, absolute README
+   docs, the words you ban, internal references in public docs, absolute README
    links, a leak scan of the git-tracked files, version alignment, the
    architecture module list, object coverage, the per-file manifest,
    versioned-file markers, dependency declarations duplicated between pyproject
@@ -80,10 +80,15 @@ The leak scan also runs on its own, as a git `pre-push` gate:
 shiplock scan
 ```
 
-It reads the git-tracked files, not only the declared docs, and flags internal
-references and, against a local gitignored blocklist you point it at, project
-code-names, home paths, and personal emails. Every match is masked in the
-output, so a code-name never echoes into a CI log.
+It reads the git-tracked files, not only the declared docs, and flags the
+internal-reference patterns, project code-names, home paths, and personal
+emails you declare. shiplock ships no rules of its own: rules about you live
+in one file per machine (`~/.config/shiplock/rules.toml`), read in every repo;
+a repo's own rules in a gitignored `shiplock.local.toml`; and patterns that
+name nothing private in `shiplock.toml`. `shiplock scan --staged` and
+`shiplock scan --range` run the same rules over the staged diff and a commit
+range, for pre-commit and pre-push hooks. Private labels and matched values
+are masked in the output, so a code-name never echoes into a CI log.
 
 Print the audit prompt with:
 

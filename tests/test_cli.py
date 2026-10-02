@@ -59,12 +59,14 @@ def test_malformed_config_is_usage_error(tmp_path, write_file, capsys):
 
 
 def test_default_run_checks_detected_docs(tmp_path, write_file, capsys):
-    write_file(tmp_path, "README.md", "this is real\n")
+    write_file(tmp_path, "README.md", "see [the guide](docs/guide.md)\n")
     code = main(["check", str(tmp_path)])
     assert code == EXIT_FINDINGS
     captured = capsys.readouterr()
-    assert "banned-words" in captured.out
+    assert "readme-links" in captured.out
     assert "no shiplock.toml" in captured.err
+    # shiplock ships no word list, so the default run skips banned words.
+    assert "banned-words skipped" in captured.err
 
 
 def test_default_run_note_names_the_config_file(tmp_path, write_file, capsys):
@@ -279,16 +281,39 @@ def _init_git(root, write_file, relpath, text):
     return root
 
 
-def test_scan_finding_returns_exit_one(tmp_path, write_file, capsys):
-    _init_git(tmp_path, write_file, "notes.txt", "see project/ for the plan")
-    code = main(["scan", str(tmp_path)])
+RULES = 'refs = [{ label = "drafts/", pattern = "\\\\bdrafts/" }]\n'
+
+
+def _rules_file(tmp_path_factory):
+    path = tmp_path_factory.mktemp("rules") / "rules.toml"
+    path.write_text(RULES, encoding="utf-8")
+    return str(path)
+
+
+def test_scan_finding_returns_exit_one(tmp_path, tmp_path_factory, write_file, capsys):
+    _init_git(tmp_path, write_file, "notes.txt", "see drafts/ for the plan")
+    code = main(["scan", str(tmp_path), "--rules", _rules_file(tmp_path_factory)])
     assert code == EXIT_FINDINGS
-    assert "internal reference to project/" in capsys.readouterr().out
+    # A label from a rules file is private, so it prints masked.
+    assert "internal reference (d******)" in capsys.readouterr().out
 
 
-def test_scan_clean_returns_exit_zero(tmp_path, write_file):
+def test_scan_clean_returns_exit_zero(tmp_path, tmp_path_factory, write_file):
     _init_git(tmp_path, write_file, "notes.txt", "nothing internal here")
+    assert main(["scan", str(tmp_path), "--rules", _rules_file(tmp_path_factory)]) == EXIT_OK
+
+
+def test_scan_with_no_rules_skips_and_exits_zero(tmp_path, write_file, capsys):
+    _init_git(tmp_path, write_file, "notes.txt", "see drafts/ for the plan")
     assert main(["scan", str(tmp_path)]) == EXIT_OK
+    assert "no rules declared" in capsys.readouterr().err
+
+
+def test_scan_reads_the_default_rules_file(tmp_path, write_file, capsys):
+    _init_git(tmp_path, write_file, "notes.txt", "see drafts/ for the plan")
+    write_file(tmp_path, ".gitignore", "shiplock.local.toml\n")
+    write_file(tmp_path, "shiplock.local.toml", RULES)
+    assert main(["scan", str(tmp_path)]) == EXIT_FINDINGS
 
 
 def test_scan_bad_path_is_usage_error(capsys):
@@ -297,18 +322,106 @@ def test_scan_bad_path_is_usage_error(capsys):
     assert "isn't a directory it can scan" in capsys.readouterr().err
 
 
-def test_scan_json_emits_one_parseable_object(tmp_path, write_file, capsys):
-    _init_git(tmp_path, write_file, "notes.txt", "see project/ plan")
-    code = main(["scan", str(tmp_path), "--json"])
+def test_scan_json_emits_one_parseable_object(tmp_path, tmp_path_factory, write_file, capsys):
+    _init_git(tmp_path, write_file, "notes.txt", "see drafts/ plan")
+    code = main(["scan", str(tmp_path), "--json", "--rules", _rules_file(tmp_path_factory)])
     payload = json.loads(capsys.readouterr().out)
     assert code == EXIT_FINDINGS
     assert payload["ok"] is False
     assert payload["findings"][0]["check"] == "scan"
 
 
-def test_scan_runs_without_a_config_file(tmp_path, write_file, capsys):
-    # No shiplock.toml: an explicit scan still runs the house ref-patterns.
-    _init_git(tmp_path, write_file, "notes.txt", "read CODING.md")
-    code = main(["scan", str(tmp_path)])
+def test_check_passes_rules_to_internal_refs(tmp_path, tmp_path_factory, write_file, capsys):
+    _init_git(tmp_path, write_file, "README.md", "see drafts/ plan\n")
+    write_file(tmp_path, "shiplock.toml", '[docs]\npublic = ["README.md"]\n')
+    code = main(["check", str(tmp_path), "--rules", _rules_file(tmp_path_factory)])
     assert code == EXIT_FINDINGS
-    assert "internal reference to CODING.md" in capsys.readouterr().out
+    assert "internal-refs" in capsys.readouterr().out
+
+
+def test_check_reports_a_deprecated_key(tmp_path, write_file, capsys):
+    write_file(tmp_path, "README.md", "fine\n")
+    write_file(
+        tmp_path,
+        "shiplock.toml",
+        '[docs]\npublic = ["README.md"]\n[style]\nextra_banned = ["leverage"]\n',
+    )
+    main(["check", str(tmp_path)])
+    assert "extra_banned is deprecated" in capsys.readouterr().err
+
+
+def test_allowed_match_renders_as_a_warning_not_a_skip(tmp_path, write_file, capsys):
+    _init_git(tmp_path, write_file, "notes.txt", "see drafts/ for the plan")
+    write_file(tmp_path, ".gitignore", "shiplock.local.toml\n")
+    write_file(tmp_path, "shiplock.local.toml", RULES + 'allow = ["drafts/"]\n')
+    assert main(["scan", str(tmp_path)]) == EXIT_OK
+    err = capsys.readouterr().err
+    assert "scan warning — allowed reference d******: 1 match in notes.txt" in err
+    assert "scan skipped — allowed" not in err
+
+
+def test_json_notices_carry_their_kind(tmp_path, write_file, capsys):
+    _init_git(tmp_path, write_file, "notes.txt", "see drafts/ for the plan")
+    write_file(tmp_path, ".gitignore", "shiplock.local.toml\n")
+    write_file(tmp_path, "shiplock.local.toml", RULES + 'allow = ["drafts/"]\n')
+    main(["scan", str(tmp_path), "--json"])
+    kinds = {n["kind"] for n in json.loads(capsys.readouterr().out)["notices"]}
+    assert kinds == {"skip", "warning"}
+
+
+def _commit_all(root, message: str) -> str:
+    import subprocess
+
+    subprocess.run(["git", "-C", str(root), "config", "user.email", "t@example.com"], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.name", "T"], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", message], check=True, capture_output=True)
+    return subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_scan_range_reads_the_pushed_commits(tmp_path, tmp_path_factory, write_file, capsys):
+    _init_git(tmp_path, write_file, "notes.txt", "clean\n")
+    base = _commit_all(tmp_path, "base")
+    write_file(tmp_path, "notes.txt", "see drafts/ plan\n")
+    _commit_all(tmp_path, "mention drafts/ in notes")
+    write_file(tmp_path, "notes.txt", "clean again\n")
+    _commit_all(tmp_path, "tidy")
+    rules = _rules_file(tmp_path_factory)
+
+    assert main(["scan", str(tmp_path), "--rules", rules]) == EXIT_OK
+    capsys.readouterr()
+    code = main(["scan", str(tmp_path), "--rules", rules, "--range", f"{base}..HEAD"])
+    out = capsys.readouterr().out
+    assert code == EXIT_FINDINGS
+    assert "notes.txt:1" in out
+    assert "commit " in out
+
+
+def test_scan_staged_reads_the_index(tmp_path, tmp_path_factory, write_file, capsys):
+    _init_git(tmp_path, write_file, "notes.txt", "see drafts/ plan\n")
+    code = main(["scan", str(tmp_path), "--rules", _rules_file(tmp_path_factory), "--staged"])
+    assert code == EXIT_FINDINGS
+    assert "notes.txt:1" in capsys.readouterr().out
+
+
+def test_scan_range_and_staged_are_mutually_exclusive(tmp_path, write_file, capsys):
+    _init_git(tmp_path, write_file, "notes.txt", "x\n")
+    with pytest.raises(SystemExit) as exc:
+        main(["scan", str(tmp_path), "--range", "HEAD~1..HEAD", "--staged"])
+    assert exc.value.code == EXIT_USAGE
+
+
+def test_user_rules_info_renders_as_info(tmp_path, write_file, monkeypatch, capsys):
+    home = tmp_path / "xdg" / "shiplock"
+    home.mkdir(parents=True)
+    (home / "rules.toml").write_text('code_names = ["bluebird"]\n', encoding="utf-8")
+    monkeypatch.delenv("SHIPLOCK_NO_USER_RULES", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "notes.txt", "clean\n")
+    assert main(["scan", str(repo)]) == EXIT_OK
+    err = capsys.readouterr().err
+    assert "scan info — 1 rule(s) from the user rules file" in err
+    assert "skipped" not in err.split("scan info")[1].split("\n")[0]

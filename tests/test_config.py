@@ -132,19 +132,19 @@ def test_scan_secrets_must_be_boolean(tmp_path, write_file):
         load_config(tmp_path)
 
 
-def test_scan_extra_refs_needs_label_and_pattern(tmp_path, write_file):
+def test_scan_refs_needs_label_and_pattern(tmp_path, write_file):
     write_file(
-        tmp_path, "shiplock.toml", '[[scan.extra_refs]]\npattern = "X-\\\\d+"\n'
+        tmp_path, "shiplock.toml", '[[scan.refs]]\npattern = "X-\\\\d+"\n'
     )
     with pytest.raises(ConfigError, match="missing required key 'label'"):
         load_config(tmp_path)
 
 
-def test_scan_extra_refs_rejects_a_bad_regex(tmp_path, write_file):
+def test_scan_refs_rejects_a_bad_regex(tmp_path, write_file):
     write_file(
         tmp_path,
         "shiplock.toml",
-        '[[scan.extra_refs]]\nlabel = "bad"\npattern = "([unclosed"\n',
+        '[[scan.refs]]\nlabel = "bad"\npattern = "([unclosed"\n',
     )
     with pytest.raises(ConfigError, match="not a valid regex"):
         load_config(tmp_path)
@@ -163,12 +163,50 @@ def test_scan_section_parses(tmp_path, write_file):
         "shiplock.toml",
         '[scan]\nblocklist = ["a.toml", "b.toml"]\nsecrets = true\n'
         'exclude = ["vendor/**"]\n\n'
-        '[[scan.extra_refs]]\nlabel = "ticket"\npattern = "ACME-\\\\d+"\n',
+        '[[scan.refs]]\nlabel = "ticket"\npattern = "ACME-\\\\d+"\n',
     )
     config = load_config(tmp_path)
     assert config.scan is not None
     assert config.scan.blocklist == ["a.toml", "b.toml"]
     assert config.scan.secrets is True
     assert config.scan.exclude == ["vendor/**"]
-    assert config.scan.extra_refs[0].label == "ticket"
-    assert config.scan.extra_refs[0].pattern == "ACME-\\d+"
+    assert config.scan.refs[0].label == "ticket"
+    assert config.scan.refs[0].pattern == "ACME-\\d+"
+    assert config.deprecations == ()
+
+
+# --- renamed keys and private keys ----------------------------------------
+
+
+def test_extra_refs_still_parses_and_records_a_deprecation(tmp_path, write_file):
+    write_file(
+        tmp_path,
+        "shiplock.toml",
+        '[[scan.extra_refs]]\nlabel = "ticket"\npattern = "ACME"\n',
+    )
+    config = load_config(tmp_path)
+    assert config.scan.refs[0].label == "ticket"
+    assert any("extra_refs is deprecated" in d for d in config.deprecations)
+
+
+def test_extra_banned_still_parses_and_records_a_deprecation(tmp_path, write_file):
+    write_file(tmp_path, "shiplock.toml", '[style]\nextra_banned = ["leverage"]\n')
+    config = load_config(tmp_path)
+    assert config.style.banned == ["leverage"]
+    assert any("extra_banned is deprecated" in d for d in config.deprecations)
+
+
+def test_setting_both_old_and_new_names_raises(tmp_path, write_file):
+    write_file(
+        tmp_path, "shiplock.toml", '[style]\nbanned = ["a"]\nextra_banned = ["b"]\n'
+    )
+    with pytest.raises(ConfigError, match="sets both 'banned'"):
+        load_config(tmp_path)
+
+
+@pytest.mark.parametrize("key", ["allow", "code_names", "home_usernames", "emails"])
+def test_private_rule_keys_are_refused_in_shiplock_toml(tmp_path, write_file, key):
+    # Committing these would publish the private rules they hold.
+    write_file(tmp_path, "shiplock.toml", f'[scan]\n{key} = ["x"]\n')
+    with pytest.raises(ConfigError, match="gitignored rules file"):
+        load_config(tmp_path)

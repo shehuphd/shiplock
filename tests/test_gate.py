@@ -661,3 +661,70 @@ def test_repo_install_is_gated_on_needs_import(job):
         run,
     )
     assert guarded, f"{job} install step doesn't gate 'pip install .' on needs-import"
+
+
+# --- the check job: private rules from the SHIPLOCK_RULES secret -----------
+
+
+def _check_step() -> str:
+    doc = yaml.safe_load(GATE.read_text())
+    return next(
+        s["run"] for s in doc["jobs"]["check"]["steps"] if s.get("name") == "Run shiplock check"
+    )
+
+
+def _run_check_step(tmp_path, rules: str | None, exit_code: int = 0):
+    """Run the check step against a stub shiplock that records what it got."""
+    bin_dir = tmp_path / "bin"
+    runner_temp = tmp_path / "runner-temp"
+    bin_dir.mkdir()
+    runner_temp.mkdir()
+    _write_stub(
+        bin_dir,
+        "shiplock",
+        'printf "%s\\n" "$@" > argv.txt\n'
+        'if [ "$2" = "--rules" ]; then\n'
+        '  cp "$3" seen-rules.toml\n'
+        '  stat -c %a "$3" 2>/dev/null > seen-mode.txt || stat -f %Lp "$3" > seen-mode.txt\n'
+        "fi\n"
+        f"exit {exit_code}\n",
+    )
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "RUNNER_TEMP": str(runner_temp),
+    }
+    if rules is not None:
+        env["SHIPLOCK_RULES"] = rules
+    script = re.sub(r"\$\{\{(.*?)\}\}", "", _check_step())
+    result = subprocess.run(
+        ["bash", "-c", script], cwd=tmp_path, capture_output=True, text=True, env=env
+    )
+    return result, runner_temp
+
+
+def test_check_passes_the_rules_secret_as_a_private_temp_file(tmp_path):
+    rules = 'code_names = ["bluebird"]\n'
+    result, runner_temp = _run_check_step(tmp_path, rules)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "argv.txt").read_text().split() == [
+        "check",
+        "--rules",
+        str(runner_temp / "shiplock-rules.toml"),
+    ]
+    assert (tmp_path / "seen-rules.toml").read_text() == rules
+    assert (tmp_path / "seen-mode.txt").read_text().strip() == "600"
+    # Removed once the check has run.
+    assert not (runner_temp / "shiplock-rules.toml").exists()
+
+
+def test_check_without_the_rules_secret_runs_plain(tmp_path):
+    result, _ = _run_check_step(tmp_path, None)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "argv.txt").read_text().split() == ["check"]
+
+
+def test_check_keeps_shiplocks_exit_code_and_still_removes_the_rules(tmp_path):
+    result, runner_temp = _run_check_step(tmp_path, 'emails = ["a@b.example"]\n', exit_code=1)
+    assert result.returncode == 1
+    assert not (runner_temp / "shiplock-rules.toml").exists()

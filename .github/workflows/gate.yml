@@ -9,8 +9,10 @@ name: shiplock gate
 #         shiplock-spec: "shiplock"   # "." for shiplock's own repo
 #       secrets:
 #         AUDIT_API_KEY: ${{ secrets.YOUR_AUDIT_KEY }}
+#         SHIPLOCK_RULES: ${{ secrets.SHIPLOCK_RULES }}   # optional
 #
-# Layer 1 (check) runs the deterministic checks. Layer 2 (audit) runs the
+# Layer 1 (check) runs the deterministic checks, with any private rules the
+# SHIPLOCK_RULES secret holds (the contents of a gitignored rules file). Layer 2 (audit) runs the
 # semantic audit and opens an issue on failure.
 #
 # Both audit secrets are provider-prefixed strings: "provider/key", e.g.
@@ -73,6 +75,14 @@ on:
         type: string
         default: "high"
     secrets:
+      SHIPLOCK_RULES:
+        description: >-
+          The contents of a shiplock rules file (private internal-reference
+          patterns, code-names, home usernames, emails, allow entries), so the
+          check job enforces rules that must never be committed. Written to a
+          private temp file for the run and removed after. When unset, only
+          the rules the repo commits are enforced.
+        required: false
       AUDIT_API_KEY:
         description: >-
           The audit key as "provider/key" (e.g. anthropic/sk-ant-... or
@@ -119,7 +129,22 @@ jobs:
             python -m pip install .
           fi
       - name: Run shiplock check
-        run: shiplock check
+        env:
+          SHIPLOCK_RULES: ${{ secrets.SHIPLOCK_RULES }}
+        run: |
+          # Private rules arrive as a secret, never from the repo. They're
+          # written to a file only this job's user can read, passed with
+          # --rules, and removed after; shiplock masks every private label and
+          # match it reports, so none of it reaches the log.
+          if [ -n "${SHIPLOCK_RULES:-}" ]; then
+            rules_file="$RUNNER_TEMP/shiplock-rules.toml"
+            (umask 077 && printf '%s' "$SHIPLOCK_RULES" > "$rules_file")
+            status=0
+            shiplock check --rules "$rules_file" || status=$?
+            rm -f "$rules_file"
+            exit "$status"
+          fi
+          shiplock check
 
   audit:
     name: Semantic audit

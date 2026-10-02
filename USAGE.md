@@ -25,9 +25,10 @@ The path can be relative or absolute, and defaults to the current directory
 (`shiplock check` inside a repo). With no `shiplock.toml` present, shiplock runs
 its default pass: the docs it recognizes by name (`README.md`, `USAGE.md`,
 `ARCHITECTURE.md`, `CHANGELOG.md`, `MANIFEST.md`, `CONTRIBUTING.md` — whichever
-exist) get swept for missing files, banned words, internal references, and
-relative README links, and a note on stderr says the run used defaults. The
-checks that need declarations skip with a notice each.
+exist) get checked for missing files and relative README links, and a note on
+stderr says the run used defaults. The checks that need declarations skip with a
+notice each, including banned words and internal references: shiplock ships no
+word list and no patterns, so those run once you declare your own.
 
 Add `--json` for one machine-readable object on stdout instead of the human
 rendering:
@@ -75,20 +76,25 @@ once and you'll know what to put in it.
    staying silent. (The zero-config default run is the one exception, and it says
    so on stderr when it happens.)
 
-2. **No file names are baked in.** The doc set this project happens to use is one
-   team's house convention, not a shiplock requirement. The default run detects
-   common names as a convenience; a `shiplock.toml` replaces that guess entirely.
+2. **No house rules are baked in.** The doc set this project happens to use is
+   one team's house convention, not a shiplock requirement, and the same goes
+   for banned words and internal-reference patterns: shiplock ships none. The
+   default run detects common names as a convenience; a `shiplock.toml`
+   replaces that guess entirely.
    Declare the docs you ship, under the names you use, and configure only the
    checks you want. A repo with just a `README.md` and no architecture doc simply
    omits `[architecture]`, and the architecture check skips.
 
 ### Start with one section
 
-The smallest config checks a README for missing files and banned words:
+The smallest config checks a README for missing files and the words you ban:
 
 ```toml
 [docs]
 public = ["README.md"]
+
+[style]
+banned = ["leverage", "synergy"]
 ```
 
 Run `shiplock check`: `docs-exist` and `banned-words` run over the README, and
@@ -99,10 +105,10 @@ you want more coverage — nothing forces you to fill in the rest.
 
 | Section | Turns on | Leave it out and |
 |---|---|---|
-| `[docs]` `public` | `docs-exist`, `banned-words`, `internal-refs` over your docs | those three don't run |
+| `[docs]` `public` | `docs-exist` over your docs, and the docs `banned-words` and `internal-refs` read | those three don't run |
 | `[docs]` `changelog` | changelog-aware banned-word scoping, and the changelog half of `version` | the changelog gets no special handling |
 | `[docs]` `readme` | `readme-links` | the absolute-link check doesn't run |
-| `[style]` | the source-code half of `banned-words` (`source_globs`) | only docs are swept, not source |
+| `[style]` | `banned-words`: your word list (`banned`), and the source files it sweeps (`source_globs`) | no word list, so `banned-words` doesn't run |
 | `[version]` | `version` (pyproject vs `__version__` vs changelog) | version alignment isn't checked |
 | `[architecture]` | `architecture` (every module named in the doc) | the module-list check doesn't run |
 | `[manifest]` | `manifest` (the per-file map exists, lists every source file, and moves with them) | a reminder notice suggests keeping one; `remind = false` silences it |
@@ -110,7 +116,7 @@ you want more coverage — nothing forces you to fill in the rest.
 | `[[versioned_files]]` | `versioned-files` — one entry per data file, repeatable | marker movement isn't checked |
 | `[deps]` | `deps-declared-once` (requirements files vs pyproject) | duplicate dependency declarations aren't checked |
 | `[tests]` | `test-assertions` (every test carries an expectation) | assertion-free tests aren't checked |
-| `[scan]` | `scan`, and the `shiplock scan` command, over your git-tracked files | the leak & internal-reference scan doesn't run |
+| `[scan]` | committed patterns (`refs`), the rules files to read, excludes, and the secrets switch for `scan` | `scan` still runs with your rules files alone, and skips with a notice when there are none |
 
 ### The complete config, annotated
 
@@ -130,9 +136,9 @@ public = ["README.md", "USAGE.md", "ARCHITECTURE.md", "CHANGELOG.md"]
 changelog = "CHANGELOG.md"   # optional: enables changelog-aware checks
 readme = "README.md"         # optional: enables readme-links
 
-[style]                          # optional: omit to sweep docs only
-extra_banned = []                # add words to the house list
-allow = []                       # exempt house words in this repo
+[style]                          # optional: omit to skip the banned-word check
+banned = ["leverage", "synergy"] # your words; shiplock ships none
+allow = []                       # words exempt in this repo
 source_globs = ["src/**/*.py"]   # shipped sources swept for banned words
 exclude = ["src/pkg/_words.py"]  # files carved out of the sweep
 
@@ -171,15 +177,17 @@ globs = ["tests/**/*.py"]
 exempt = []                  # test names, or "path::test_name", allowed without one
 
 [scan]                       # optional: the leak & internal-reference scan
-# Local, gitignored files holding your sensitive inputs (code-names, home
-# usernames, personal emails). The path is yours to set; shiplock bakes in
-# none. A blocklist that git tracks is refused as a finding.
-blocklist = ["~/.config/shiplock-blocklist.toml", ".shiplock.local.toml"]
+# Repo-level gitignored rules files to read. Omit to read shiplock.local.toml
+# at the repo root. Your own user-level rules file is read either way. A rules
+# file that git tracks is refused as a finding.
+blocklist = ["shiplock.local.toml", "team-rules.toml"]
 secrets = false              # opt in to generic secret-pattern detection
 exclude = ["vendor/**"]      # tracked files to skip
-# [[scan.extra_refs]]        # repeatable: extend the internal-reference patterns
-# label = "ticket"
-# pattern = 'ACME-\d+'
+# Patterns that name nothing internal, enforced in CI. Anything that would
+# publish an internal name belongs in a rules file instead.
+refs = [
+  { label = "ticket id", pattern = 'ACME-\d+' },
+]
 ```
 
 ## The checks
@@ -189,10 +197,10 @@ Twelve deterministic checks, run in this order:
 | Check | Asserts |
 |---|---|
 | `docs-exist` | Every declared public doc exists on disk. |
-| `banned-words` | The house banned-word list (word-boundary, case-insensitive) is absent from public docs and the configured source globs. The changelog is swept only above its first released-version heading. |
-| `internal-refs` | No reference to an internal-only artifact appears in public docs: the gitignored planning folder, the coding-standards file, roadmap files, bug, lessons, and test logs, or assistant tool directories. A planning-folder path inside a `pypi.org` URL is carved out. `[scan].extra_refs` extends the pattern set for this check and `scan` together. |
+| `banned-words` | The words in `[style].banned` (word-boundary, case-insensitive) are absent from public docs and the configured source globs. The changelog is swept only above its first released-version heading. Skips with a notice when no words are declared. |
+| `internal-refs` | No declared internal-reference pattern matches in public docs. Patterns come from `[scan].refs` and your rules files; shiplock ships none, and skips with a notice when there are none. |
 | `readme-links` | Every markdown link in the README is absolute (`http`, `https`, `#`, or `mailto`), since PyPI resolves relative links against pypi.org. |
-| `scan` | Over the git-tracked files (`git ls-files`), not only the declared docs: the same internal-reference patterns, plus, when a blocklist is configured, your project code-names, home paths, and personal emails. Every matched string is masked in the output. Runs only when `[scan]` is declared; the `shiplock scan` command runs it directly, with the house patterns, on any repo. See below. |
+| `scan` | Over the git-tracked files (`git ls-files`), not only the declared docs: the same internal-reference patterns, plus the code-names, home usernames, and personal emails in your rules files. Private labels and matches are masked in the output. Runs when `[scan]` is declared; the `shiplock scan` command runs it directly on any repo. See below. |
 | `version` | The pyproject version equals the package's `__version__`, and the changelog carries a heading for that version or an `[Unreleased]` section. |
 | `architecture` | Every top-level module and subpackage under the source directory is named in the architecture doc, or listed as exempt. |
 | `coverage` | Every member of a declared object appears in its declared doc. Three kinds: `enum` (member names), `params` (a callable's parameter names), `exports` (a module's `__all__`). |
@@ -201,56 +209,176 @@ Twelve deterministic checks, run in this order:
 | `deps-declared-once` | No package is declared in both `pyproject.toml` (dependencies and optional groups) and a requirements file matched by `[deps].requirements`. Names compare in canonical form, so `Foo_Bar` and `foo-bar` are one package; comment, option, and URL lines are ignored. |
 | `test-assertions` | Every test function in the files matched by `[tests].globs` (module-level `test_*`, and `test_*` methods of `Test*` classes) contains an expectation: an `assert`, a `raises`/`warns`/`deprecated_call` context, or a call whose name starts with `assert`. A shared helper counts for the tests that call it: any call resolving to a function elsewhere in the test tree is followed, through same-module definitions, imports in any form, and `conftest.py`. A call resolving outside that tree is the code under test, so it's never an expectation. A test that only relies on code not raising should assert the side effect it exists to pin, or be exempted by name. |
 
-### The leak scan and its blocklist
+### Rules: what `internal-refs` and `scan` enforce
 
-`internal-refs` reads only the docs you declare public. `scan` reads the whole
-git-tracked set, so a code-name in a test fixture or a README example, a file
-you never declared, doesn't reach a push. It flags the internal-reference
-patterns, and, when you point it at a blocklist, three identity classes:
-project code-names, home paths, and personal emails.
+shiplock ships no rules. Every internal-reference pattern, code-name, home
+username, and personal email these checks enforce is one you declare, and
+where you declare it decides where it's enforced:
 
-The sensitive inputs live in a local file you gitignore, never in a repo's
-committed source and never in shiplock's. You set its path in `[scan].blocklist`;
-shiplock bakes in no default location. A global file covers every repo, and a
-repo-local one layers on top. A blocklist that git tracks is refused as a
-finding, so the one dangerous mistake fails the run instead of shipping. Each
-configured blocklist path is carved out of the internal-reference check, so
-pointing the blocklist under your assistant config directory doesn't trip the
-scan on the line that declares it; a match anywhere else still fires.
+| Where | Committed | Runs | Holds |
+|---|---|---|---|
+| Your user rules file (`~/.config/shiplock/rules.toml`) | no | every repo on this machine | internal-reference patterns, code-names, home usernames, emails, `allow` |
+| A repo rules file (`shiplock.local.toml`, or the files `[scan].blocklist` names) | no, gitignore it | that repo, locally | the same keys |
+| `[scan].refs` in `shiplock.toml` | yes | locally and in CI | patterns that name nothing internal |
+| `--rules PATH` | no | wherever you pass it | the same format, e.g. a file a CI gate writes from a secret |
+
+A pattern that names one of your internal files would publish that name if you
+committed it, so private rules live in the gitignored files. To enforce them
+in CI too, see [Private rules in CI](#private-rules-in-ci).
+
+`scan` reads the whole git-tracked set, so a code-name in a test fixture or a
+README example, a file you never declared, doesn't reach a push. It runs
+inside `shiplock check` whenever any rules exist, and skips with a notice when
+none do. `internal-refs` holds the same patterns against your declared public
+docs.
+
+#### Your user rules file
+
+Rules about you, your code-names, your home username, your personal email,
+apply to every repo you push from, so they live in one file per machine that
+shiplock reads in every repo with no config:
+
+| Platform | Default location |
+|---|---|
+| macOS, Linux | `$XDG_CONFIG_HOME/shiplock/rules.toml`, or `~/.config/shiplock/rules.toml` when `XDG_CONFIG_HOME` is unset |
+| Windows | `%APPDATA%\shiplock\rules.toml` |
+| Any | `SHIPLOCK_USER_RULES=/path/to/rules.toml` overrides the default |
+
+The file is read when it exists and silent when it doesn't; a file named
+through `SHIPLOCK_USER_RULES` reports when missing. Set
+`SHIPLOCK_NO_USER_RULES=1` to run a repo against its own rules only, which
+shiplock's own test suite does. When the user file contributes rules, the
+scan says so in an info notice with the count and the path, so two people
+running the same repo can explain why their results differ.
+
+#### A repo's rules file
+
+A repo's own rules, the folders it keeps private and the entries it allows,
+go in `shiplock.local.toml` at the repo root, which shiplock reads when
+`[scan].blocklist` names no files. Name other files there instead when you
+need them. Add each to `.gitignore`; a rules file that git tracks is refused
+as a finding, so the one mistake that would ship its contents fails the run.
+Problems inside a rules file (an unknown key, a bad regex) print as notices,
+since that file differs per machine.
+
+Both files use the same format. The starter rules below cover common cases;
+copy what applies and adapt it. shiplock never loads them on its own.
+
+<!-- starter-rules:start -->
+```toml
+# shiplock.local.toml (gitignored)
+refs = [
+  # A private folder, but not the same word ending a longer name or an npm
+  # scope like @acme-drafts/.
+  { label = "drafts/", pattern = '(?<![\w@.-])drafts/' },
+  # Assistant config directories, but not domains like platform.claude.com.
+  { label = ".claude", pattern = '(?<![\w.])\.claude\b' },
+  { label = ".codex", pattern = '(?<![\w.])\.codex\b' },
+  { label = ".cursor", pattern = '(?<![\w.])\.cursor\b' },
+  { label = ".grok", pattern = '(?<![\w.])\.grok\b' },
+]
+code_names = ["bluebird"]            # names that aren't public yet
+home_usernames = ["ada"]             # flags /Users/ada and /home/ada
+emails = ["ada@personal.example"]    # personal addresses
+allow = []                           # entries this repo contains on purpose
+```
+<!-- starter-rules:end -->
+
+Keep public names off the code-name list: a name already published on PyPI,
+npm, crates.io, or a public GitHub repo isn't a secret, and listing it fails
+every repo that depends on it.
+
+#### Allowing what a repo contains on purpose
+
+`allow` lists entries this repo contains deliberately: a contact address in
+the README, a project's own name inside its own repo, a pattern label. An
+entry is either a bare string, allowed anywhere in the repo, or a table that
+names where it's allowed:
 
 ```toml
-# ~/.config/shiplock-blocklist.toml (or a repo-local, gitignored file)
-code_names = ["projectx", "bluebird"]   # flagged anywhere in a tracked file
-home_usernames = ["ada"]                # flags /Users/ada and /home/ada
-emails = ["ada@personal.example"]       # flags this address
+allow = [
+  "bluebird",                                                      # anywhere
+  { value = "ada@personal.example", paths = ["README.md", "docs/"] },
+]
 ```
 
-Every finding names the file, the line, and the rule, and masks the match to
-its first character, so a code-name never echoes into the CI log the scan
-writes. With no blocklist configured, the identity classes skip with a notice
-and the internal-reference patterns still run. `.gitignore` and `.gitattributes`
-are never scanned: naming an internal directory there is what keeps it out of
-the repo. Binary files are skipped, and `[scan].exclude` globs skip more.
+`paths` are repo-relative globs, matched the way `[scan].exclude` is; a
+trailing slash names a folder and everything under it. `value` is what
+`allow` matches: a code-name, username, or email string, or a pattern's
+label. Two entries for one value combine their paths, and a bare entry
+allows the value everywhere whatever else says.
+
+Allowed matches never fail the run. Each allowed entry that matched prints
+one notice with its count and the files it matched in, masked; an entry that
+matched nothing prints nothing. A match outside an entry's paths is a
+finding, and its message names the allowed paths so the fix is clear. A glob
+that matches no tracked file prints a warning, so a renamed file doesn't
+leave a scope pointing at nothing.
+
+`allow` is read only from rules files, never from `shiplock.toml`: a
+committed allow entry would publish part of your private list.
+
+#### Output
+
+Every finding names the file, the line, and the rule. A pattern's label from a
+rules file, and every matched code-name, username, or email, shows only its
+first character, so nothing private reaches a CI log. Labels from
+`shiplock.toml` are already public and print in full. `.gitignore` and
+`.gitattributes` are never scanned, since naming a private path there keeps it
+out of the repo. The paths in `[scan].blocklist` are carved out of the pattern
+match, and `shiplock.toml` never flags its own `refs` declarations. Binary
+files are skipped, and `[scan].exclude` globs skip more.
+
+#### Secrets
 
 `secrets = true` opts into generic secret-pattern detection (private-key blocks,
-common cloud and token forms). It's off by default: a dedicated scanner such as
-gitleaks covers secrets more thoroughly, and the broad patterns can fire on a
-fixture. shiplock owns the internal-reference and identity class; the switch is
-there for repos that want a coarse net in the same pass.
+common cloud and token formats). It's off by default: a dedicated scanner such
+as gitleaks covers secrets more thoroughly, and the broad patterns can fire on
+a fixture.
 
-Run it as its own command, so a git `pre-push` hook is one line:
+#### Running it
+
+`shiplock scan` runs on any repo with whatever rules it finds: your user
+file, the repo's rules file, any `--rules` files, plus `[scan]`'s committed
+patterns when the repo declares them. With no rules at all it skips with a
+notice. Three modes:
 
 ```bash
-shiplock scan            # scan the current repo's tracked files
-shiplock scan path/to/repo
+shiplock scan                              # every git-tracked file, as of now
+shiplock scan --staged                     # the added lines of the staged diff
+shiplock scan --range origin/main..HEAD    # the added lines and commit messages of a commit range
 ```
 
-`shiplock scan` runs with the house patterns on any repo, no config needed, and
-picks up your `[scan]` blocklist, extra patterns, and secrets switch when the
-repo declares them. In the gate, the `scan` check runs only when `[scan]` is
-declared, so upgrading shiplock never adds a failing check to a repo that hasn't
-opted in. Exit codes match the rest of the CLI: 0 clean, 1 a finding, 2 a usage
-or config error.
+The tracked-file scan is the audit `shiplock check` and CI run. The other two
+are for hooks. A push carries every commit in the range, so a name committed
+and removed again before the push, or one in a commit message, still leaves
+the machine: `--range` reads each commit's added lines and its message, and
+takes any `git rev-list` expression. `--staged` reads only what's about to be
+committed, so it's fast enough to run on every commit, and it catches a leak
+while the fix is one amend rather than a history rewrite.
+
+Wire them into git by hand for now (a later release adds a command that
+does it):
+
+```bash
+# .git/hooks/pre-commit
+#!/bin/sh
+shiplock scan --staged
+
+# .git/hooks/pre-push
+#!/bin/sh
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    range="$local_sha --not --remotes"
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  shiplock scan --range "$range" || exit 1
+done
+```
+
+Exit codes match the rest of the CLI: 0 clean, 1 a finding, 2 a usage or
+config error.
 
 ### The manifest reminder
 
@@ -502,6 +630,37 @@ Wire it in dormant first: start with `on: workflow_dispatch`, run it once by
 hand, then switch to the push and pull-request triggers above once a manual run
 passes.
 
+### Private rules in CI
+
+A rules file is gitignored, so CI never sees it. To enforce the same rules in
+CI, store the file's contents in a repository secret named `SHIPLOCK_RULES`:
+
+```bash
+gh secret set SHIPLOCK_RULES < shiplock.local.toml
+```
+
+Then pass it to the gate:
+
+```yaml
+    secrets:
+      AUDIT_API_KEY: ${{ secrets.YOUR_AUDIT_KEY }}
+      SHIPLOCK_RULES: ${{ secrets.SHIPLOCK_RULES }}
+```
+
+The `check` job writes the secret to a file readable only by the runner's
+user, runs `shiplock check --rules` on it, and deletes it when the run ends.
+Findings mask private labels and matched values, so the rules themselves stay
+out of the job log. Without the secret, the job runs only the committed
+`[scan].refs`. GitHub withholds secrets from workflows a fork's pull request
+triggers, so the secret covers pushes by collaborators and cloud agents, not
+outside contributors. And a CI run starts after the commit is already on
+GitHub: the hooks above are what stop a leak before it leaves the machine,
+and CI is the backstop for a machine that ran without them.
+
+To combine several local rules files into one secret, concatenate their
+contents into one valid TOML file first: each key may appear only once, so
+merge the arrays by hand.
+
 ## Python API
 
 Everything the CLI does is callable. The public surface:
@@ -513,7 +672,7 @@ Everything the CLI does is callable. The public surface:
 | `Config` | The parsed config, rooted at a path. |
 | `Report` | The result of a run: `findings`, `notices`, and `ok`. |
 | `Finding` | One disagreement between a doc surface and the code. |
-| `Notice` | One skipped check, with its reason. |
+| `Notice` | One note about the run: a skipped check (`kind="skip"`), a warning such as an allowed match or a deprecated key (`kind="warning"`), or context such as where the rules came from (`kind="info"`). |
 | `ConfigError` | Raised on a missing or malformed config. |
 
 ```python

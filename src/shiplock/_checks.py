@@ -23,7 +23,15 @@ from shiplock._config import (
 )
 from shiplock._introspect import IntrospectError, introspect
 from shiplock._report import Finding, Notice
-from shiplock._scan import build_ref_patterns, run_scan, strip_exempt
+from shiplock._scan import (
+    AllowTally,
+    default_scan_config,
+    git_tracked_files,
+    load_rules,
+    ref_findings,
+    run_scan,
+    strip_exempt,
+)
 
 CheckResult = tuple[list[Finding], list[Notice]]
 
@@ -92,7 +100,7 @@ def check_docs_exist(config: Config) -> CheckResult:
 
 
 def check_banned_words(config: Config) -> CheckResult:
-    """Sweep public docs and configured sources for the house banned words.
+    """Sweep public docs and configured sources for the declared banned words.
 
     The changelog is swept only above its first released-version heading;
     released sections are frozen history and stay untouched.
@@ -103,8 +111,10 @@ def check_banned_words(config: Config) -> CheckResult:
         return [], [Notice(name, "no docs or source globs to sweep; skipped")]
 
     style = config.style
-    extra = tuple(style.extra_banned) if style else ()
+    banned = tuple(style.banned) if style else ()
     allow = tuple(style.allow) if style else ()
+    if not banned:
+        return [], [Notice(name, "no banned words declared ([style].banned); skipped")]
     changelog = config.docs.changelog if config.docs else None
 
     findings: list[Finding] = []
@@ -116,7 +126,7 @@ def check_banned_words(config: Config) -> CheckResult:
         cutoff = None
         if changelog is not None and rel == changelog:
             cutoff = _changelog_cutoff(text)
-        for hit in _style.find_banned(text, extra, allow):
+        for hit in _style.find_banned(text, banned, allow):
             if cutoff is not None and hit.line >= cutoff:
                 continue
             findings.append(
@@ -126,32 +136,37 @@ def check_banned_words(config: Config) -> CheckResult:
 
 
 def check_internal_refs(config: Config) -> CheckResult:
-    """Flag references to internal-only artifacts in public docs."""
+    """Flag declared internal-reference patterns in the public docs.
+
+    The patterns come from ``[scan].refs`` and the rules files; shiplock ships
+    none. The ``scan`` check reports rules-file problems, so this check
+    doesn't repeat them.
+    """
     name = "internal-refs"
     if config.docs is None or not config.docs.public:
         return [], [Notice(name, "no [docs].public declared; skipped")]
 
-    extra = config.scan.extra_refs if config.scan else []
-    exempt = tuple(config.scan.blocklist) if config.scan else ()
-    patterns = build_ref_patterns(extra)
+    tracked = git_tracked_files(config.root)
+    rules, _, _ = load_rules(config, set(tracked) if tracked is not None else None, name)
     findings: list[Finding] = []
+    notices: list[Notice] = []
+    if not rules.refs:
+        notices.append(
+            Notice(name, "no internal-reference patterns declared ([scan].refs or a rules file); skipped")
+        )
+        return findings, notices
+
+    exempt = tuple(config.scan.blocklist) if config.scan else ()
+    tally = AllowTally()
     for rel in config.docs.public:
         text = _read_text(config.root / rel)
         if text is None:
             continue
         for i, line in enumerate(text.splitlines(), start=1):
             probe = strip_exempt(line, exempt)
-            for label, pattern in patterns:
-                if pattern.search(probe):
-                    findings.append(
-                        Finding(
-                            name,
-                            f"internal reference to {label}",
-                            path=rel,
-                            line=i,
-                        )
-                    )
-    return findings, []
+            findings.extend(ref_findings(name, rules, rel, i, probe, tally))
+    notices.extend(tally.notices(name))
+    return findings, notices
 
 
 def check_readme_links(config: Config) -> CheckResult:
@@ -187,14 +202,11 @@ def check_readme_links(config: Config) -> CheckResult:
 def check_scan(config: Config) -> CheckResult:
     """Scan the git-tracked set for internal references and identity leaks.
 
-    Opt-in: a repo with no ``[scan]`` section skips with a notice, so an
-    existing gate doesn't gain a new failing check on upgrade. The ``shiplock
-    scan`` subcommand runs the scan directly with a default config when none is
-    declared.
+    Runs whenever any rules are declared: ``[scan]`` in the config, or a rules
+    file (the user's own, the repo's default, or one passed with ``--rules``).
+    A repo with no ``[scan]`` and no rules skips with the scan's own notice.
     """
-    if config.scan is None:
-        return [], [Notice("scan", "no [scan] declared; skipped")]
-    return run_scan(config, config.scan)
+    return run_scan(config, config.scan or default_scan_config())
 
 
 def check_version(config: Config) -> CheckResult:
@@ -1045,11 +1057,17 @@ def needs_import(config: Config) -> bool:
     return version_configured or bool(config.coverage)
 
 
+def deprecation_notices(config: Config) -> list[Notice]:
+    """One notice per deprecated config key the repo still uses."""
+    return [Notice("config", message, kind="warning") for message in config.deprecations]
+
+
 def run_checks(config: Config):
     """Run every check over ``config`` and return the combined report."""
     from shiplock._report import Report
 
     report = Report()
+    report.extend([], deprecation_notices(config))
     for check in _CHECKS:
         findings, notices = check(config)
         report.extend(findings, notices)

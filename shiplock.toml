@@ -10,11 +10,15 @@ changelog = "CHANGELOG.md"
 readme = "README.md"
 
 [style]
-extra_banned = []
+# The house banned-word list. shiplock ships none; each repo declares its own.
+banned = [
+  "travel", "matters", "serious", "intersection", "quietly", "exactly",
+  "genuine", "genuinely", "consistently", "straightforward", "worth", "earn",
+  "earns", "sits", "sat", "lands", "landed", "shapes", "actually", "land",
+  "shifts", "gap", "gaps", "sharper", "cleanly", "real",
+]
 allow = []
 source_globs = ["src/**/*.py", "src/shiplock/prompts/*.md", "scripts/*.py"]
-# The module defining the banned list is carved out of its own sweep.
-exclude = ["src/shiplock/_style.py"]
 
 [version]
 package = "shiplock"
@@ -44,8 +48,8 @@ requirements = ["requirements*.txt", "tools/requirements*.txt"]
 globs = ["tests/**/*.py"]
 
 [scan]
-# Scan the git-tracked set for internal references and identity leaks. The
-# module defining the ref-patterns and the test fixtures name the internal
-# tokens on purpose, so they're carved out the way _style.py is carved out of
-# the banned-word sweep. shiplock ships no code-name blocklist.
-exclude = ["src/shiplock/_scan.py", "src/shiplock/_checks.py", "tests/**"]
+# Scan the git-tracked set. Private rules (internal-reference patterns, code-
+# names, identities) live in the gitignored shiplock.local.toml, read by
+# default; in CI the gate reads them from a repository secret. The tests plant
+# leaks on purpose.
+exclude = ["tests/**"]

@@ -14,6 +14,7 @@ translated to sentences, with a fuzzy suggestion when one is close enough.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import difflib
 import json
 import os
@@ -23,7 +24,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from shiplock import __version__
-from shiplock._checks import needs_import, run_checks
+from shiplock._checks import deprecation_notices, needs_import, run_checks
 from shiplock._config import CONFIG_FILENAME, ConfigError, default_config, load_config
 from shiplock._report import Report
 
@@ -93,9 +94,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "check":
-        return _cmd_check(Path(args.path), as_json=args.json)
+        return _cmd_check(Path(args.path), as_json=args.json, rules=args.rules)
     if args.command == "scan":
-        return _cmd_scan(Path(args.path), as_json=args.json)
+        return _cmd_scan(
+            Path(args.path),
+            as_json=args.json,
+            rules=args.rules,
+            rev_range=args.range,
+            staged=args.staged,
+        )
     if args.command == "needs-import":
         return _cmd_needs_import(Path(args.path))
     return _cmd_prompt(args.kind)
@@ -128,6 +135,14 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print the report as one JSON object on stdout",
     )
+    check.add_argument(
+        "--rules",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="an extra rules file to read (repeatable), e.g. one a CI gate "
+        "writes from a secret",
+    )
 
     scan = sub.add_parser(
         "scan",
@@ -144,6 +159,28 @@ def _build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="print the report as one JSON object on stdout",
+    )
+    scan.add_argument(
+        "--rules",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="an extra rules file to read (repeatable), e.g. one a CI gate "
+        "writes from a secret",
+    )
+    mode = scan.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--range",
+        metavar="REVS",
+        help="scan the added lines and commit messages of a commit range "
+        "(a git rev-list expression, e.g. origin/main..HEAD) instead of the "
+        "tracked files; what a pre-push hook checks",
+    )
+    mode.add_argument(
+        "--staged",
+        action="store_true",
+        help="scan the added lines of the staged diff instead of the tracked "
+        "files; what a pre-commit hook checks",
     )
 
     prompt = sub.add_parser(
@@ -174,7 +211,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _cmd_check(root: Path, as_json: bool = False) -> int:
+def _cmd_check(root: Path, as_json: bool = False, rules: list[str] | None = None) -> int:
     if not root.is_dir():
         print(
             f"shiplock: '{root}' isn't a directory it can check. Point it at a "
@@ -190,6 +227,7 @@ def _cmd_check(root: Path, as_json: bool = False) -> int:
         print(f"shiplock: {exc}", file=sys.stderr)
         return EXIT_USAGE
 
+    config = dataclasses.replace(config, rules_paths=tuple(rules or ()))
     report = run_checks(config)
     if as_json:
         print(json.dumps(_to_json(report)))
@@ -206,17 +244,30 @@ def _cmd_check(root: Path, as_json: bool = False) -> int:
     return EXIT_FINDINGS if not report.ok else EXIT_OK
 
 
-def _cmd_scan(root: Path, as_json: bool = False) -> int:
+def _cmd_scan(
+    root: Path,
+    as_json: bool = False,
+    rules: list[str] | None = None,
+    rev_range: str | None = None,
+    staged: bool = False,
+) -> int:
     """Run the leak & internal-reference scan alone over ``root``.
 
-    Explicit invocation always scans: a repo that declares no ``[scan]`` gets
-    the default scan (house ref-patterns over the tracked set, no blocklist),
-    so a pre-push hook is one command with no setup. A declared ``[scan]`` adds
-    its blocklist, extra patterns, and the secrets switch. Exit codes match the
-    rest of the CLI: 0 clean, 1 a finding, 2 a usage or config error.
+    Explicit invocation always scans, with whatever rules are declared: the
+    user's rules file, the default rules file, and any ``--rules`` files even
+    when the repo declares no ``[scan]``, plus ``[scan]``'s committed refs,
+    rules files, and secrets switch when it does. With no rules at all it
+    skips with a notice. ``rev_range`` scans a commit range and ``staged`` the
+    staged diff instead of the tracked files. Exit codes match the rest of the
+    CLI: 0 clean, 1 a finding, 2 a usage or config error.
     """
     from shiplock._config import ScanConfig
-    from shiplock._scan import default_scan_config, run_scan
+    from shiplock._scan import (
+        default_scan_config,
+        run_scan,
+        run_scan_range,
+        run_scan_staged,
+    )
 
     if not root.is_dir():
         print(
@@ -233,9 +284,15 @@ def _cmd_scan(root: Path, as_json: bool = False) -> int:
         print(f"shiplock: {exc}", file=sys.stderr)
         return EXIT_USAGE
 
+    config = dataclasses.replace(config, rules_paths=tuple(rules or ()))
     scan_cfg: ScanConfig = config.scan or default_scan_config()
-    findings, notices = run_scan(config, scan_cfg)
-    report = Report(findings=findings, notices=notices)
+    if rev_range is not None:
+        findings, notices = run_scan_range(config, scan_cfg, rev_range)
+    elif staged:
+        findings, notices = run_scan_staged(config, scan_cfg)
+    else:
+        findings, notices = run_scan(config, scan_cfg)
+    report = Report(findings=findings, notices=deprecation_notices(config) + notices)
     if as_json:
         print(json.dumps(_to_json(report)))
     else:
@@ -282,7 +339,9 @@ def _to_json(report: Report) -> dict:
             {"check": f.check, "message": f.message, "path": f.path, "line": f.line}
             for f in report.findings
         ],
-        "notices": [{"check": n.check, "message": n.message} for n in report.notices],
+        "notices": [
+            {"check": n.check, "kind": n.kind, "message": n.message} for n in report.notices
+        ],
     }
 
 
@@ -305,7 +364,8 @@ def _render(report: Report) -> None:
         print(f"{_paint(prefix, _RED, sys.stdout)}\n    {finding.message}")
 
     for notice in report.notices:
-        print(f"shiplock: {notice.check} skipped — {notice.message}", file=sys.stderr)
+        label = "skipped" if notice.kind == "skip" else notice.kind
+        print(f"shiplock: {notice.check} {label} — {notice.message}", file=sys.stderr)
 
     n = len(report.findings)
     if report.ok:

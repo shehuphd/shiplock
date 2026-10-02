@@ -44,3 +44,5 @@ jobs:
       # e.g. anthropic/sk-ant-... and openai/sk-...
       AUDIT_API_KEY: ${{ secrets.AUDIT_API_KEY }}
       AUDIT_FALLBACK_API_KEY: ${{ secrets.AUDIT_FALLBACK_API_KEY }}
+      # The contents of the private rules file, so CI enforces them too.
+      SHIPLOCK_RULES: ${{ secrets.SHIPLOCK_RULES }}

@@ -21,6 +21,9 @@ from shiplock._compat import tomllib
 
 CONFIG_FILENAME = "shiplock.toml"
 COVERAGE_KINDS = ("enum", "params", "exports")
+# Keys that belong only in a gitignored rules file: committing them would
+# publish the private rules they hold.
+_PRIVATE_SCAN_KEYS = {"allow", "code_names", "home_usernames", "emails"}
 
 
 class ConfigError(Exception):
@@ -40,7 +43,8 @@ class DocsConfig:
 
 @dataclass(frozen=True)
 class StyleConfig:
-    extra_banned: list[str] = field(default_factory=list)
+    # The repo's own banned-word list; shiplock ships none.
+    banned: list[str] = field(default_factory=list)
     allow: list[str] = field(default_factory=list)
     source_globs: list[str] = field(default_factory=list)
     exclude: list[str] = field(default_factory=list)
@@ -105,9 +109,8 @@ class TestsConfig:
 
 @dataclass(frozen=True)
 class RefPattern:
-    # A caller-supplied internal-reference pattern: ``label`` names what a hit
-    # means, ``pattern`` is the regex. Consumed by both ``internal-refs`` and
-    # ``scan``, so the extendable pattern set is declared once.
+    # A declared internal-reference pattern: ``label`` names what a hit means,
+    # ``pattern`` is the regex. Read by both ``internal-refs`` and ``scan``.
     label: str
     pattern: str
 
@@ -115,13 +118,13 @@ class RefPattern:
 @dataclass(frozen=True)
 class ScanConfig:
     # The leak & internal-reference scan over the git-tracked set. ``blocklist``
-    # names the local, gitignored TOML files holding the sensitive inputs
-    # (code-names, home usernames, personal emails); their location is the
-    # caller's to set, never baked into shiplock. ``extra_refs`` extends the
-    # house internal-ref patterns. ``secrets`` opts into generic secret-pattern
-    # detection (off by default). ``exclude`` globs skip tracked files.
+    # names the local, gitignored rules files (private ref patterns, code-names,
+    # home usernames, personal emails, allow entries); empty means the default
+    # ``shiplock.local.toml`` at the repo root. ``refs`` holds committed ref
+    # patterns that name nothing internal. ``secrets`` opts into generic
+    # secret-pattern detection. ``exclude`` globs skip tracked files.
     blocklist: list[str] = field(default_factory=list)
-    extra_refs: list[RefPattern] = field(default_factory=list)
+    refs: list[RefPattern] = field(default_factory=list)
     secrets: bool = False
     exclude: list[str] = field(default_factory=list)
 
@@ -141,6 +144,11 @@ class Config:
     deps: DepsConfig | None = None
     tests: TestsConfig | None = None
     scan: ScanConfig | None = None
+    # Extra rules files passed on the command line (``--rules``), e.g. the file
+    # a CI gate writes from a repo secret. Read alongside ``[scan].blocklist``.
+    rules_paths: tuple[str, ...] = ()
+    # Deprecated keys the config used, reported as notices by the run.
+    deprecations: tuple[str, ...] = ()
 
 
 _DEFAULT_DOC_NAMES = (
@@ -220,10 +228,11 @@ def _parse(root: Path, raw: dict) -> Config:
             f"Valid sections: {', '.join(sorted(known))}."
         )
 
+    deprecations: list[str] = []
     return Config(
         root=root,
         docs=_parse_docs(raw.get("docs")),
-        style=_parse_style(raw.get("style")),
+        style=_parse_style(raw.get("style"), deprecations),
         version=_parse_version(raw.get("version")),
         architecture=_parse_architecture(raw.get("architecture")),
         manifest=_parse_manifest(raw.get("manifest")),
@@ -231,8 +240,19 @@ def _parse(root: Path, raw: dict) -> Config:
         versioned_files=_parse_versioned_files(raw.get("versioned_files")),
         deps=_parse_deps(raw.get("deps")),
         tests=_parse_tests(raw.get("tests")),
-        scan=_parse_scan(raw.get("scan")),
+        scan=_parse_scan(raw.get("scan"), deprecations),
+        deprecations=tuple(deprecations),
     )
+
+
+def _renamed(section: dict, old: str, new: str, where: str, deprecations: list[str]):
+    """Read ``new``, accepting the deprecated ``old`` name for one release."""
+    if old in section and new in section:
+        raise ConfigError(f"{where} sets both '{new}' and its old name '{old}'; keep '{new}'.")
+    if old in section:
+        deprecations.append(f"{where}.{old} is deprecated; rename it to '{new}'.")
+        return section[old]
+    return section.get(new)
 
 
 def _require_table(section: object, where: str) -> dict:
@@ -264,14 +284,13 @@ def _parse_docs(section: object) -> DocsConfig | None:
     )
 
 
-def _parse_style(section: object) -> StyleConfig | None:
+def _parse_style(section: object, deprecations: list[str]) -> StyleConfig | None:
     if section is None:
         return None
     _require_table(section, "[style]")
+    banned = _renamed(section, "extra_banned", "banned", "[style]", deprecations)
     return StyleConfig(
-        extra_banned=_require_str_list(
-            section.get("extra_banned", []), "[style].extra_banned"
-        ),
+        banned=_require_str_list(banned if banned is not None else [], "[style].banned"),
         allow=_require_str_list(section.get("allow", []), "[style].allow"),
         source_globs=_require_str_list(
             section.get("source_globs", []), "[style].source_globs"
@@ -401,10 +420,17 @@ def _parse_tests(section: object) -> TestsConfig | None:
     )
 
 
-def _parse_scan(section: object) -> ScanConfig | None:
+def _parse_scan(section: object, deprecations: list[str]) -> ScanConfig | None:
     if section is None:
         return None
     _require_table(section, "[scan]")
+    private = sorted(_PRIVATE_SCAN_KEYS & set(section))
+    if private:
+        raise ConfigError(
+            f"[scan] sets {', '.join(private)}, which would publish private rules "
+            f"in a committed file. Move them to a gitignored rules file "
+            f"(shiplock.local.toml, or one [scan].blocklist names)."
+        )
 
     raw_blocklist = section.get("blocklist", [])
     if isinstance(raw_blocklist, str):
@@ -415,36 +441,41 @@ def _parse_scan(section: object) -> ScanConfig | None:
     if not isinstance(secrets, bool):
         raise ConfigError("[scan].secrets must be a boolean.")
 
-    extra_refs = _parse_extra_refs(section.get("extra_refs"))
+    refs = parse_ref_tables(
+        _renamed(section, "extra_refs", "refs", "[scan]", deprecations), "[scan].refs"
+    )
 
     return ScanConfig(
         blocklist=blocklist,
-        extra_refs=extra_refs,
+        refs=refs,
         secrets=secrets,
         exclude=_require_str_list(section.get("exclude", []), "[scan].exclude"),
     )
 
 
-def _parse_extra_refs(section: object) -> list[RefPattern]:
+def parse_ref_tables(section: object, where: str) -> list[RefPattern]:
+    """Validate an array of ``{label, pattern}`` tables into ``RefPattern``s.
+
+    Shared with the local rules-file loader, which catches the ``ConfigError``
+    and reports it as a notice, since that file varies per machine.
+    """
     if section is None:
         return []
     if not isinstance(section, list):
-        raise ConfigError("[scan].extra_refs must be an array of tables.")
+        raise ConfigError(f"{where} must be an array of tables.")
     entries: list[RefPattern] = []
     for i, item in enumerate(section):
-        where = f"[scan].extra_refs entry {i}"
-        _require_table(item, where)
+        at = f"{where} entry {i}"
+        _require_table(item, at)
         for key in ("label", "pattern"):
             if key not in item:
-                raise ConfigError(f"{where} is missing required key '{key}'.")
-        pattern = _require_str(item["pattern"], f"{where}.pattern")
+                raise ConfigError(f"{at} is missing required key '{key}'.")
+        pattern = _require_str(item["pattern"], f"{at}.pattern")
         try:
             re.compile(pattern)
         except re.error as exc:
-            raise ConfigError(f"{where}.pattern is not a valid regex: {exc}") from exc
-        entries.append(
-            RefPattern(label=_require_str(item["label"], f"{where}.label"), pattern=pattern)
-        )
+            raise ConfigError(f"{at}.pattern is not a valid regex: {exc}") from exc
+        entries.append(RefPattern(label=_require_str(item["label"], f"{at}.label"), pattern=pattern))
     return entries
 
 
