@@ -279,6 +279,16 @@ def test_adapter_for_reads_provider_prefix_and_rejects_unknown():
         adapter_for("typesafe", "")
 
 
+def test_a_judge_api_key_must_name_a_known_provider():
+    # A JUDGE_API_KEY naming another service is refused before any call, so
+    # that key never reaches the default provider as a bearer token.
+    with pytest.raises(JudgeError, match="'openai', which isn't a judgment provider"):
+        adapter_for("typesafe", "openai/sk-abc", prefixed=True)
+    with pytest.raises(JudgeError, match="provider/key"):
+        adapter_for("typesafe", "abc", prefixed=True)
+    assert isinstance(adapter_for("typesafe", "TypeSafe/abc", prefixed=True), TypeSafeAdapter)
+
+
 # The TypeSafe adapter against a local server
 
 

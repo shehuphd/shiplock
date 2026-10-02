@@ -282,7 +282,7 @@ def _parse(root: Path, raw: dict) -> Config:
 
 
 def _renamed(section: dict, old: str, new: str, where: str, deprecations: list[str]):
-    """Read ``new``, accepting the deprecated ``old`` name for one release."""
+    """Read ``new``, accepting the deprecated ``old`` name until 1.0.0."""
     if old in section and new in section:
         raise ConfigError(f"{where} sets both '{new}' and its old name '{old}'; keep '{new}'.")
     if old in section:

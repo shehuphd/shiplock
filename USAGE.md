@@ -37,6 +37,8 @@ rendering:
 shiplock check path/to/repo --json
 ```
 
+`shiplock scan` and `shiplock judge` take `--json` too.
+
 Set a repo up for the leak scan in one command:
 
 ```bash
@@ -47,7 +49,8 @@ It writes a starter `shiplock.toml` from the docs it finds, a gitignored
 rules file, and the two git hooks that stop a leak before it leaves the
 machine, then lists the folders the repo ignores so you can turn them into
 rules. It never overwrites a file and never asks a question, so an assistant
-can run it unattended. Then add the names to keep out:
+can run it unattended. `shiplock init --no-hooks` skips the hooks. Then add
+the names to keep out:
 
 ```bash
 shiplock rules add code-name bluebird
@@ -278,6 +281,7 @@ shiplock rules add file NOTES.md                # builds the pattern
 shiplock rules add ref "ticket ids" --pattern 'ACME-\d+'
 shiplock rules allow ada@personal.example --in README.md --in docs/
 shiplock rules remove code-name bluebird
+shiplock rules remove allow ada@personal.example
 shiplock rules list                             # masked; --unmask for full values
 shiplock rules suggest                          # what the repo ignores and no rule covers
 ```
@@ -444,16 +448,16 @@ takes any `git rev-list` expression. `--staged` reads only what's about to be
 committed, so it's fast enough to run on every commit, and it catches a leak
 while the fix is one amend rather than a history rewrite.
 
-`shiplock init` installs both hooks. Each runs shiplock through the Python
-interpreter `init` ran under, so it works from a GUI git client or a shell
+`shiplock init` installs both hooks. Each runs `python -m shiplock` through
+the Python interpreter `init` ran under, so it works from a GUI git client or a shell
 with no virtualenv active; if that interpreter has moved it falls back to
 `shiplock` on PATH, and when neither can be found it blocks the commit or
 push with a message saying so, since a hook that passed on its own would
 remove the protection you think you have. `--no-verify` bypasses a hook
-once. `init` never overwrites a hook that exists; it prints the line to add
-instead. A `core.hooksPath` set in the repo's own config is used; one set in
-your global git config is shared by every repo on the machine, so `init`
-leaves it alone and prints the lines for you to add there.
+once. `init` never overwrites a hook that exists; it lists the line to add
+to it instead. A `core.hooksPath` set in the repo's own config is used; one
+set in your global git config is shared by every repo on the machine, so
+`init` leaves it alone and lists the lines for you to add there.
 
 Written by hand, the hooks are:
 
@@ -533,7 +537,7 @@ when one is close enough, a "Perhaps you meant" suggestion.
 
 ## The judge
 
-Between the deterministic checks and the agent audit there's a third layer:
+Between the deterministic checks and the agent audit there's a second layer:
 typed questions to a judgment model, which answers each with a probability
 and generates no text. It runs only when invoked, and it's billable:
 
@@ -542,6 +546,7 @@ export TYPESAFE_API_KEY=...        # or JUDGE_API_KEY=typesafe/...
 shiplock judge                     # coverage warnings and claim leads
 shiplock judge --out judge.json    # keep the full result for the audit
 shiplock judge --no-leads          # coverage only
+shiplock judge --json              # the full result as one JSON object
 shiplock judge --audit-output audit.md   # also check an agent audit's output
 ```
 
@@ -566,8 +571,10 @@ file, and (as judgments) the verdict follows from the findings and the
 findings name specific places. A missing verdict, an untracked path, or a
 verdict that doesn't follow is a finding.
 
-Every run ends with an info notice: calls made, input tokens, claims judged,
-sentences it couldn't anchor to code. The pinned model is compared with the
+A run that reaches the provider ends with an info notice: calls made, input
+tokens, claims judged (none with `--no-leads`), and sentences it couldn't
+anchor to code. A directory that isn't a git repo, or a repo with no docs to
+judge, skips with a notice instead. The pinned model is compared with the
 one the provider reports; a different one is a finding. The key comes from
 `TYPESAFE_API_KEY`, or `JUDGE_API_KEY` in `provider/key` form, never from
 an argument. Exit codes match `shiplock check`. The judge sends the judged
@@ -577,7 +584,7 @@ git-tracked public content.
 ## The semantic audit
 
 `shiplock check` covers what a machine can decide with certainty, and the
-judge adds warnings and leads. The third layer is a prompt for a fresh agent
+judge adds warnings and leads. The third layer, the audit, is a prompt for a fresh agent
 to read the code and hold every doc claim against it, from state rather than
 from what changed. Print it with:
 
@@ -641,7 +648,7 @@ Input is the whole prompt on every provider, cached tokens included; the cache
 read and cache write columns are parts of it. Anthropic reports those three
 parts beside each other, so the gate adds them up before the table. The price
 comes from rates' bundled offline snapshot (no extra network call), keyed on
-the model id the CLI billed when it reports one (a run pinned to an alias such
+the model id the CLI billed when it reports a single one (a run pinned to an alias such
 as `sonnet` is priced on the dated id behind it), with 1-hour cache writes at
 their own rate. When rates carries no price for the model, the cell shows the
 CLI's own cost figure marked `CLI-reported` if the CLI gives one, and `n/a`

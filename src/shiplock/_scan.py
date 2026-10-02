@@ -566,9 +566,10 @@ def run_scan_range(config: Config, scan: ScanConfig, rev_range: str) -> CheckRes
 
     ``rev_range`` is any ``git rev-list`` expression (``origin/main..HEAD``, or
     ``HEAD --not --remotes`` for a branch the remote doesn't have yet; words
-    are split on whitespace). Each commit's diff against its first parent is read for added lines, so a
-    leak added and removed within the range is still found; each commit
-    message is scanned as well, since a push carries those too.
+    are split on whitespace). Each non-merge commit's diff against its parent
+    is read for added lines, so a leak added and removed within the range is
+    still found; a merge commit contributes its message only. Every commit
+    message is scanned, since a push carries those too.
     """
     name = "scan"
     scanner, notices, findings, _ = _prepare(config, scan, name)

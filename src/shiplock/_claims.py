@@ -153,12 +153,3 @@ def _shipped(path: str) -> bool:
 
 _FOREIGN_ENV = {"PATH", "HOME", "APPDATA", "XDG_CONFIG_HOME", "NO_COLOR", "TERM", "CI", "GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY",
                 "GITHUB_SHA", "GITHUB_REF", "GITHUB_TOKEN", "GH_TOKEN", "RUNNER_TEMP", "GITHUB_ENV", "GITHUB_REPOSITORY"}
-
-
-def _own_env_var(name: str, index: Index) -> bool:
-    """An env var the repo's own code reads, not one the platform sets.
-
-    A shell ``$NAME`` in a workflow, or a Python name that happens to match,
-    doesn't count; only a read through the language's env API does.
-    """
-    return name not in _FOREIGN_ENV and any(loc.kind == "env" for loc in index.symbols.get(name, []))

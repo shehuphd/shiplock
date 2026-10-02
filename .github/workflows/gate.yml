@@ -605,8 +605,8 @@ jobs:
           fi
 
           # Usage report first, and fail-soft throughout: a missing field, an
-          # unpriced model, or a missing rates install all print n/a and can
-          # never block the verdict. Cost is priced uniformly for every
+          # unpriced model, or a missing rates install never block the
+          # verdict; a cell that can't be filled prints n/a. Cost is priced uniformly for every
           # provider from rates' own bundled snapshot (offline, no extra
           # network call), keyed on the model id the CLI billed when its
           # envelope carries one (a pinned alias such as "sonnet" has no

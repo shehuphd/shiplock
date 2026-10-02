@@ -172,7 +172,7 @@ def _hooks_dir(root: Path) -> Path | None | str:
         if local.returncode != 0:
             return (
                 f"core.hooksPath is set outside this repo ({source}), to {value}; "
-                f"shared hooks aren't touched. Add the lines below to the hooks there."
+                f"shared hooks aren't touched; the lines to add there are listed below."
             )
     proc = _git(root, "rev-parse", "--git-path", "hooks")
     if proc.returncode != 0:
@@ -186,7 +186,7 @@ def _install_hook(hooks_dir: Path, name: str, body: str, interpreter: str) -> tu
     path = hooks_dir / name
     if path.exists():
         return (
-            f"{name} hook: exists, left as is; add this line to it: {HOOK_LINES[name]}",
+            f"{name} hook: exists, left as is; the line to add is listed below",
             HOOK_LINES[name],
         )
     purpose = {

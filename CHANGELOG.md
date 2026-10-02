@@ -36,15 +36,31 @@ semantic versioning.
   questions flagged every undocumented flag. So the judge gates on nothing
   the model says about a sentence; the checks that gate stay deterministic.
 
+### Changed
+- The deprecated `[scan].extra_refs` and `[style].extra_banned` names still
+  load, with a warning, as they have since 0.8.0. They're removed in 1.0.0.
+
 ### Fixed
 - The release gate's usage line and job-summary table under-reported input
   on an Anthropic key: the CLI reports cache reads and cache writes beside
   `input_tokens`, so a run that read 3.3M cached tokens showed as 30 in.
   Input is now the whole prompt on every provider. The cost column, which
   showed `n/a` for a run pinned to an alias such as `sonnet`, now prices on
-  the model id the CLI billed, charges 1-hour cache writes at their own
+  the model id the CLI billed when it reports a single one, charges 1-hour
+  cache writes at their own
   rate, and falls back to the CLI's own cost figure, marked as such, when
   rates has no card for the model.
+- `shiplock init` now prints the line to add to each hook it leaves alone:
+  an existing `pre-commit` or `pre-push` hook, or every hook when
+  `core.hooksPath` is set outside the repo. 0.9.0 said it would and printed
+  nothing.
+- A `JUDGE_API_KEY` that doesn't start with a known provider name is refused
+  before any call, so a key meant for another service never reaches the
+  judge's provider.
+- With `--no-leads`, the judge's closing notice no longer counts claims it
+  didn't judge.
+- The docs now cover `init --no-hooks`, `scan --json`, `judge --json`,
+  `rules remove allow`, and the hooks' `python -m shiplock` form.
 
 ## [0.9.0] - 2026-10-02
 

@@ -151,12 +151,24 @@ def _error_text(status: int, payload: dict) -> str:
 ADAPTERS: dict[str, Callable[[str], Adapter]] = {"typesafe": TypeSafeAdapter}
 
 
-def adapter_for(provider: str, key: str) -> Adapter:
-    """The adapter for a provider name; a key of the form ``provider/key`` sets both."""
+def adapter_for(provider: str, key: str, prefixed: bool = False) -> Adapter:
+    """The adapter for a provider name; a key of the form ``provider/key`` sets both.
+
+    With ``prefixed`` (a ``JUDGE_API_KEY``), the key must start with a known
+    provider name, so a key meant for another service is refused here and
+    never sent to the default provider.
+    """
     if "/" in key and not key.startswith("http"):
         prefix, _, rest = key.partition("/")
         if prefix.lower() in ADAPTERS:
             provider, key = prefix.lower(), rest
+        elif prefixed:
+            raise JudgeError(
+                f"JUDGE_API_KEY names '{prefix}', which isn't a judgment provider; "
+                f"the providers are {', '.join(sorted(ADAPTERS))}."
+            )
+    elif prefixed and key:
+        raise JudgeError("JUDGE_API_KEY takes the form provider/key, e.g. typesafe/<key>.")
     factory = ADAPTERS.get(provider)
     if factory is None:
         raise JudgeError(f"'{provider}' isn't a judgment provider; the providers are {', '.join(sorted(ADAPTERS))}.")
@@ -241,7 +253,7 @@ def run_judge(config: Config, adapter: Adapter, judge: JudgeConfig | None = None
         Notice(
             "judge",
             f"{spend['calls']} call(s), {spend['input_tokens']} input tokens, "
-            f"{len(surface.claims)} claim(s) judged as leads, "
+            f"{len(surface.claims) if leads else 0} claim(s) judged as leads, "
             f"{sum(surface.unanchored.values())} sentence(s) unanchored{refused}",
             kind="info",
         )
@@ -301,7 +313,7 @@ def _doc_chunks(adapter: Adapter, model: str, doc: str, text: str, questions: di
     """Ask over a doc; on a 403 (a content block) split it in two and ask each half.
 
     Yields ``(part label, answers)`` for each chunk that answered. Two levels
-    of splitting bound the retries at three extra calls per doc.
+    of splitting bound the retries at six extra calls per doc.
     """
     purpose = f"coverage:{doc}" if depth == 0 else f"coverage:{doc} (part)"
     answers = _call(adapter, model, purpose, {"doc": text}, questions, result)

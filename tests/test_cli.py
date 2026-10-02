@@ -457,6 +457,33 @@ def test_init_sets_a_repo_up_and_suggests(tmp_path, write_file, user_home, capsy
     assert (repo / "shiplock.local.toml").is_file()
 
 
+def test_init_prints_the_hook_lines_for_a_shared_hooks_path(tmp_path, write_file, user_home, monkeypatch, capsys):
+    shared = tmp_path / "shared-hooks"
+    shared.mkdir()
+    gitconfig = tmp_path / "shared-gitconfig"
+    gitconfig.write_text(f"[core]\n\thooksPath = {shared}\n", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(gitconfig))
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "README.md", "x\n")
+    assert main(["init", str(repo)]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert list(shared.iterdir()) == []
+    assert "Lines to add to the existing hooks:" in out
+    assert "pre-commit: shiplock scan --staged" in out
+    assert "pre-push: shiplock scan --range" in out
+
+
+def test_init_prints_the_line_for_a_hook_that_exists(tmp_path, write_file, user_home, capsys):
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "README.md", "x\n")
+    write_file(repo, ".git/hooks/pre-commit", "#!/bin/sh\nexit 0\n")
+    assert main(["init", str(repo)]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "pre-commit hook: exists, left as is" in out
+    assert "pre-commit: shiplock scan --staged" in out
+    assert (repo / ".git" / "hooks" / "pre-commit").read_text() == "#!/bin/sh\nexit 0\n"
+
+
 def test_init_on_a_missing_path_is_a_usage_error(tmp_path, capsys):
     assert main(["init", str(tmp_path / "nope")]) == EXIT_USAGE
     assert "isn't a directory" in capsys.readouterr().err

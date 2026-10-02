@@ -9,10 +9,13 @@ the full map of its structure, components, integrations, and testing.
 
 ### Shape
 
-Shiplock is a docs-vs-code release gate: fourteen deterministic checks that run
-the same way in a terminal, a test suite, and CI, plus two shipped agent
-prompts (the gating semantic audit and an advisory ablation report), all
-configured per repo by one `shiplock.toml`.
+Shiplock is a docs-vs-code release gate in three layers: fourteen
+deterministic checks that run the same way in a terminal, a test suite, and
+CI; an opt-in judge that asks a judgment model typed questions about doc
+coverage and doc claims; and two shipped agent prompts (the gating semantic
+audit and an advisory ablation report). A leak scan, the `init` and `rules`
+setup commands, and git hooks sit beside them. One `shiplock.toml` configures
+it per repo.
 
 ### Technical stack
 
@@ -101,18 +104,20 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
   billable API key, wired up in the CI gate.
 - The shipped CI wiring is GitHub Actions only: the reusable gate, the
   issue-on-failure step, and trusted publishing all assume GitHub.
-- `versioned-files` and `manifest` depend on the `git` CLI and a reachable
-  tag; without either, they skip with a notice instead of checking.
+- `versioned-files` depends on the `git` CLI and a reachable tag; without
+  either it skips with a notice. `manifest` still checks its listing and its
+  `Last updated` line without them, and skips only the staleness compare.
 - shiplock ships no banned words and no internal-reference patterns; a repo
   that declares none gets a skip notice from `banned-words`, `internal-refs`,
   and `scan`. Private rules reach CI only through the `SHIPLOCK_RULES` secret,
   which a fork's pull request can't read.
-- `scan --range` reads each commit's diff against its first parent, so a
-  merge commit's own conflict resolution isn't scanned.
+- `scan --range` reads each non-merge commit's diff against its parent, and
+  a merge commit's message only, so a merge's own conflict resolution isn't
+  scanned.
 - The hooks `init` writes are POSIX `sh` scripts; on Windows they need Git
   for Windows' shell, which git uses for hooks anyway.
 - The judge's claim answers are leads, never findings, and uncovered surface is a warning: two evals put sentence-level judgment below the bar for gating, so only the audit-output structure and model drift can fail a judge run.
-- `doc-defaults` reads argparse only; a repo with another parser gets no default comparison (`[anchors].defaults = false` silences the skip notice's suggestion).
+- `doc-defaults` reads argparse only; a repo with another parser gets a skip notice and no default comparison. `[anchors].defaults = false` turns the check off.
 - `rules suggest` sees only ignored folders that exist on the current
   machine, since git reports what's present.
 
@@ -131,7 +136,7 @@ shiplock/
 │   ├── _claims.py        # claims from the docs, coverage items from the code
 │   ├── _judge.py         # the judge: provider registry, TypeSafe adapter, the run
 │   ├── _report.py        # Finding, Notice, Report result types
-│   ├── _style.py         # the banned-word list and matcher
+│   ├── _style.py         # the banned-word matcher
 │   ├── _scan.py          # the rules loader and the leak & internal-reference scan
 │   ├── _rules.py         # the rules-file editor: writer, pattern builders, merge, the CI secret
 │   ├── _suggest.py       # suggested rules from the repo's ignored folders and files
@@ -187,7 +192,7 @@ shiplock check
 | `_compat` | Version-guarded imports in one place: `tomllib` from the standard library on 3.11+, the `tomli` backport on 3.10. |
 | `_config` | Reads `shiplock.toml`, validates it, and returns a frozen `Config` of typed sections. Raises `ConfigError` on an unknown top-level section, a wrong-typed value, or a section missing a required field. |
 | `_checks` | Holds the fourteen check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
-| `_report` | Defines `Finding` (a disagreement), `Notice` (a skip or a warning, with its reason), and `Report` (both, plus `ok`). |
+| `_report` | Defines `Finding` (a disagreement), `Notice` (a skip, a warning, or an info line, with its reason), and `Report` (both, plus `ok`). |
 | `_style` | The word-boundary banned-word matcher over the words a repo declares in `[style].banned`. Ships no word list. |
 | `_scan` | Loads the rules (the user's per-machine file, committed `[scan].refs`, gitignored repo rules files, `--rules` files), then runs the leak & internal-reference scan in one of three modes: the git-tracked set, the staged diff, or a commit range's added lines and messages. One line scanner serves all three: ref patterns, the identity classes, path-scoped `allow` with masked counts, and an opt-in secret switch. |
 | `_rules` | Edits rules files without hand-written TOML: a writer for shiplock's own five-key layout that refuses to drop a person's comments unless told to rewrite, the `folder` and `file` pattern builders, the merge of several files into one document, and `push-secret`, which hands that document to `gh secret set` on stdin only. |
@@ -214,7 +219,7 @@ The fourteen checks: `docs-exist`, `banned-words`, `internal-refs`,
 
 ## The judge
 
-`shiplock judge` is a third layer between the checks and the agent audit:
+`shiplock judge` is the second layer, between the checks and the agent audit:
 typed questions to a judgment provider, answered with probabilities, no text
 generated. `_symbols` indexes the repo's source (Python through `ast`, other
 languages by regex); `_claims` turns the docs into anchored claims with the
@@ -240,17 +245,28 @@ metadata (via the `git` CLI) and write only to stdout and stderr, apart from
 write by design: `init` writes `shiplock.toml`, `shiplock.local.toml`, a
 `.gitignore` line, and two hook scripts, never over a file that exists;
 `rules` rewrites the rules file it targets; `rules push-secret` runs
-`gh secret set`. The user rules file under the config directory is read, and
-written only by `rules --user`.
+`gh secret set`. The user rules file under the config directory is read in
+every run, and written by `rules add` for code-names, emails, usernames, and
+refs (or any kind with `--user`) and by `rules remove`.
 
 ## External integrations
 
-- **git** — `versioned-files` shells out to `git describe` and `git show` to
+- **git**: `versioned-files` shells out to `git describe` and `git show` to
   compare a data file against its content at the last reachable tag, and
   `manifest` uses `git diff` against the same tag to see whether sources moved
-  without the manifest. Absent git or absent tags produce a notice, not a
+  without the manifest. `scan`, `doc-anchors`, `doc-defaults`, and the judge
+  read the tracked set through `git ls-files`; `scan --staged` and
+  `--range` read `git diff` and `git diff-tree`; `init` reads git's hooks
+  path and config; `rules suggest` reads `git ls-files --ignored` and
+  `git check-ignore`. Absent git or absent tags produce a notice, not a
   failure.
-- **The consuming package** — `version` and `coverage` read the repo's own
+- **TypeSafe**: `shiplock judge` sends one HTTPS POST per question batch to
+  TypeSafe's API, with the judged docs and code excerpts, under the key from
+  `TYPESAFE_API_KEY` or `JUDGE_API_KEY`. Nothing else in shiplock calls a
+  network service.
+- **gh**: `rules push-secret` runs `gh secret set SHIPLOCK_RULES`, passing
+  the merged rules on stdin.
+- **The consuming package**: `version` and `coverage` read the repo's own
   package (`__version__`, `__all__`, enum members, callable signatures) through
   `_introspect`, which runs a subprocess with the checked root's source
   prepended to `sys.path` and confirms the module resolved under root before
@@ -328,10 +344,10 @@ shiplock repo, wired into the test suite so the gate runs with every test.
 Tests are adversarial-first (failing cases before happy paths). A committed
 mutation check (`scripts/mutation_check.py`, run by the CI `mutation` job) breaks
 each check in turn and confirms its own test fails, so a test that guards nothing
-can't pass unnoticed. The gate workflow's shell orchestration is tested too:
-`tests/test_init.py` runs the installed hooks under `sh` against a staged
-and a pushed leak, including the fail-closed branch with the interpreter path
-gone. `tests/test_gate.py` extracts the audit job's step scripts from `gate.yml`
+can't pass unnoticed. `tests/test_init.py` runs the installed hooks under
+`sh` against a staged and a pushed leak, including the fail-closed branch
+with the interpreter path gone. The gate workflow's shell orchestration is
+tested too: `tests/test_gate.py` extracts the audit job's step scripts from `gate.yml`
 itself and runs them against stub agent CLIs, covering key validation, the
 missing-key skip, the cross-provider failover continuation, and the
 rates-priced usage table, plus the `check` job's `SHIPLOCK_RULES` step.

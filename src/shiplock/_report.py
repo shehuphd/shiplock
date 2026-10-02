@@ -2,8 +2,9 @@
 
 A check emits ``Finding`` objects (a doc surface disagrees with the code) and
 ``Notice`` objects: a skip (a check's surface isn't declared, or it couldn't run
-for a stated reason) or a warning (something to see that doesn't fail the run,
-such as an allowed match or a deprecated config key). The distinction is
+for a stated reason), a warning (something to see that doesn't fail the run,
+such as an allowed match or a deprecated config key), or an info line (where
+the rules came from, what a judge run spent). The distinction is
 load-bearing: a skip is never a pass. A ``Report`` collects both and answers one question through
 ``ok`` — did anything fail?
 """

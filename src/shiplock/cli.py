@@ -389,6 +389,11 @@ def _cmd_init(root: Path, hooks: bool = True) -> int:
     result = run_init(root, hooks=hooks)
     for line in result.lines:
         print(f"shiplock init: {line}")
+    if result.hooks_to_add:
+        print()
+        print("Lines to add to the existing hooks:")
+        for name, line in result.hooks_to_add.items():
+            print(f"  {name}: {line}")
     config = _config_for(root)
     if config is not None:
         print()
@@ -650,9 +655,10 @@ def _cmd_judge(root: Path, as_json: bool = False, out: str | None = None, audit_
         return EXIT_USAGE
     judge_cfg = config.judge
     provider = judge_cfg.provider if judge_cfg else "typesafe"
+    prefixed = bool(os.environ.get("JUDGE_API_KEY"))
     key = os.environ.get("JUDGE_API_KEY") or os.environ.get("TYPESAFE_API_KEY") or ""
     try:
-        adapter = adapter_for(provider, key)
+        adapter = adapter_for(provider, key, prefixed=prefixed)
         result = run_judge(config, adapter, judge_cfg, audit_output=audit_output, leads=leads)
     except JudgeError as exc:
         print(f"shiplock: {exc}", file=sys.stderr)
