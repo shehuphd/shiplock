@@ -37,7 +37,26 @@ rendering:
 shiplock check path/to/repo --json
 ```
 
-Print the semantic audit prompt for a fresh agent:
+Set a repo up for the leak scan in one command:
+
+```bash
+shiplock init
+```
+
+It writes a starter `shiplock.toml` from the docs it finds, a gitignored
+rules file, and the two git hooks that stop a leak before it leaves the
+machine, then lists the folders the repo ignores so you can turn them into
+rules. It never overwrites a file and never asks a question, so an assistant
+can run it unattended. Then add the names to keep out:
+
+```bash
+shiplock rules add code-name bluebird
+shiplock rules add email ada@personal.example
+shiplock rules add folder drafts/
+```
+
+The rules section below has the rest. Print the semantic audit prompt for a
+fresh agent:
 
 ```bash
 shiplock prompt
@@ -232,6 +251,52 @@ inside `shiplock check` whenever any rules exist, and skips with a notice when
 none do. `internal-refs` holds the same patterns against your declared public
 docs.
 
+#### Editing rules with `shiplock rules`
+
+Nobody has to write TOML or a regex. `shiplock rules` edits the files:
+
+```bash
+shiplock rules add code-name bluebird kestrel   # names that aren't public yet
+shiplock rules add email ada@personal.example
+shiplock rules add username ada                 # flags /Users/ada and /home/ada
+shiplock rules add folder drafts/               # builds the pattern
+shiplock rules add file NOTES.md                # builds the pattern
+shiplock rules add ref "ticket ids" --pattern 'ACME-\d+'
+shiplock rules allow ada@personal.example --in README.md --in docs/
+shiplock rules remove code-name bluebird
+shiplock rules list                             # masked; --unmask for full values
+shiplock rules suggest                          # what the repo ignores and no rule covers
+```
+
+Where each command writes, unless `--user` or `--repo` says otherwise:
+
+| Command | File | Why |
+|---|---|---|
+| `add` code-name, email, username, ref | your user file | These describe you, and apply to every repo you push from |
+| `add` folder, file | the repo's `shiplock.local.toml` | An ignored folder or a private file belongs to one repo |
+| `allow` | the repo's `shiplock.local.toml` | What a repo contains on purpose is specific to it |
+| `remove` | whichever file holds the entry | |
+
+`folder` and `file` build the pattern: `drafts/` matches `drafts/`, `./drafts/`,
+and `repo/drafts/x` but not `@acme-drafts/` or `my_drafts/`; a dot folder
+like `.notes` gets the form that skips domains such as `platform.notes.com`;
+a nested path (`docs/internal/`) keeps every component; `NOTES.md` matches
+that name and not `docs/NOTES.md`, `my-NOTES.md`, or `NOTES.mdx`. Output masks
+the values, since a terminal log or an assistant transcript is one more place
+a name can end up.
+
+The writer rewrites a file in its own layout, which would drop any comment
+you wrote in it by hand. When the target file holds one, the command refuses,
+prints the entry to add yourself, and exits 2; `--rewrite` lets it proceed.
+A file shiplock wrote carries only its own header, which the writer keeps.
+
+`shiplock rules suggest` (which `init` also runs) lists the folders git
+ignores in this repo and the files a `.gitignore` line names outright, minus
+tool output such as `node_modules/` or `.venv/` and minus anything a rule
+already covers, with how many tracked files name each. Nothing is written
+until you run the `add` command it prints. Git only reports ignored folders
+that exist on this machine.
+
 #### Your user rules file
 
 Rules about you, your code-names, your home username, your personal email,
@@ -249,7 +314,8 @@ through `SHIPLOCK_USER_RULES` reports when missing. Set
 `SHIPLOCK_NO_USER_RULES=1` to run a repo against its own rules only, which
 shiplock's own test suite does. When the user file contributes rules, the
 scan says so in an info notice with the count and the path, so two people
-running the same repo can explain why their results differ.
+running the same repo can explain why their results differ. `shiplock rules
+list` prints the resolved path.
 
 #### A repo's rules file
 
@@ -261,8 +327,9 @@ as a finding, so the one mistake that would ship its contents fails the run.
 Problems inside a rules file (an unknown key, a bad regex) print as notices,
 since that file differs per machine.
 
-Both files use the same format. The starter rules below cover common cases;
-copy what applies and adapt it. shiplock never loads them on its own.
+Both files use the same format, shown below for anyone editing by hand;
+`shiplock rules` writes the same thing. shiplock never loads these examples
+on its own.
 
 <!-- starter-rules:start -->
 ```toml
@@ -357,8 +424,18 @@ takes any `git rev-list` expression. `--staged` reads only what's about to be
 committed, so it's fast enough to run on every commit, and it catches a leak
 while the fix is one amend rather than a history rewrite.
 
-Wire them into git by hand for now (a later release adds a command that
-does it):
+`shiplock init` installs both hooks. Each runs shiplock through the Python
+interpreter `init` ran under, so it works from a GUI git client or a shell
+with no virtualenv active; if that interpreter has moved it falls back to
+`shiplock` on PATH, and when neither can be found it blocks the commit or
+push with a message saying so, since a hook that passed on its own would
+remove the protection you think you have. `--no-verify` bypasses a hook
+once. `init` never overwrites a hook that exists; it prints the line to add
+instead. A `core.hooksPath` set in the repo's own config is used; one set in
+your global git config is shared by every repo on the machine, so `init`
+leaves it alone and prints the lines for you to add there.
+
+Written by hand, the hooks are:
 
 ```bash
 # .git/hooks/pre-commit
@@ -633,7 +710,22 @@ passes.
 ### Private rules in CI
 
 A rules file is gitignored, so CI never sees it. To enforce the same rules in
-CI, store the file's contents in a repository secret named `SHIPLOCK_RULES`:
+CI, store them in a repository secret named `SHIPLOCK_RULES`:
+
+```bash
+shiplock rules push-secret
+```
+
+It merges your user file and the repo's rules file into one document and
+hands it to `gh secret set` on stdin (never as an argument, so it never
+appears in a process list or shell history). It needs the
+[GitHub CLI](https://cli.github.com/), logged in with rights to set secrets.
+The secret is a copy: rerun the command after changing any rules file. On a
+repo where other people can edit workflows, a workflow edit can read a
+secret, so your code-names from unrelated projects would reach them;
+`--repo-only` sends only the repo's own rules file for that case.
+
+Or set it by hand from one file:
 
 ```bash
 gh secret set SHIPLOCK_RULES < shiplock.local.toml
@@ -657,9 +749,6 @@ outside contributors. And a CI run starts after the commit is already on
 GitHub: the hooks above are what stop a leak before it leaves the machine,
 and CI is the backstop for a machine that ran without them.
 
-To combine several local rules files into one secret, concatenate their
-contents into one valid TOML file first: each key may appear only once, so
-merge the arrays by hand.
 
 ## Python API
 

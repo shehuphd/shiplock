@@ -3,6 +3,35 @@
 All notable changes to shiplock are recorded here. This project follows
 semantic versioning.
 
+## [0.9.0] - 2026-10-02
+
+### Added
+- `shiplock init`: sets a repo up in one command, with no prompts. It writes
+  a starter `shiplock.toml` from the docs it finds, a gitignored
+  `shiplock.local.toml`, the `.gitignore` line for it, and two git hooks:
+  `pre-commit` running `shiplock scan --staged` and `pre-push` running
+  `shiplock scan --range` over each pushed ref. Each hook runs shiplock
+  through the interpreter `init` ran under, falls back to PATH, and blocks
+  the commit or push with a message when neither can be found. It never
+  overwrites a file; an existing hook gets the line to add printed, and a
+  `core.hooksPath` set in global git config is left alone. It ends by
+  listing the folders the repo ignores that no rule covers.
+- `shiplock rules`: `add` (code-name, email, username, ref, folder, file),
+  `allow` with `--in PATH`, `remove`, `list` (masked, `--unmask` for full
+  values), `suggest`, and `push-secret`. `folder` and `file` build the
+  pattern from a name. Person-level rules go to the user file and repo-level
+  ones to `shiplock.local.toml`, with `--user` and `--repo` to override. The
+  writer refuses to rewrite a file that holds hand-written comments unless
+  `--rewrite`.
+- `shiplock rules suggest` lists the folders git ignores in the repo and the
+  files a `.gitignore` line names outright, minus tool output and anything a
+  rule already covers, with how many tracked files name each. Nothing is
+  written until the `add` command it prints is run.
+- `shiplock rules push-secret` merges the rules files and stores them as the
+  repo's `SHIPLOCK_RULES` secret through `gh`, on stdin only. `--repo-only`
+  leaves the user file out, for shared repos.
+- `python -m shiplock` runs the CLI, which is how the hooks invoke it.
+
 ## [0.8.0] - 2026-10-02
 
 ### Changed (breaking)

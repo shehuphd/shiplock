@@ -9,7 +9,7 @@ from shiplock._config import Config, ConfigError, load_config
 from shiplock._report import Finding, Notice, Report
 from shiplock._checks import run_checks
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 __all__ = [
     "Config",

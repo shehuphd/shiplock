@@ -53,9 +53,13 @@ That makes `shiplock check` a drop-in CI step and a pytest assertion alike.
 findings render red and a clean run green (`NO_COLOR` turns that off); piped
 output stays plain.
 
-When you want the rest of the checks — version alignment, architecture and
-manifest coverage, object documentation, versioned-file markers — add a
-`shiplock.toml` declaring your repo's surfaces. The full schema, section by
+To set a repo up, run `shiplock init`: it writes a starter `shiplock.toml`,
+a gitignored rules file, and the git hooks that stop a leak before it leaves
+the machine, then add the names to keep out with `shiplock rules add
+code-name NAME` (or `email`, `folder`, `file`). When you want the rest of the
+checks — version alignment, architecture and manifest coverage, object
+documentation, versioned-file markers — extend the `shiplock.toml` with your
+repo's surfaces. The full schema, section by
 section, is in
 [USAGE.md](https://github.com/shehuphd/shiplock/blob/main/USAGE.md).
 
@@ -74,7 +78,9 @@ Shiplock checks in two layers:
    from what changed. Centrally versioned inside the package, so every repo gets
    prompt updates on the next install.
 
-The leak scan also runs on its own, as a git `pre-push` gate:
+The leak scan also runs on its own, and in the git hooks `shiplock init`
+installs (`pre-commit` over the staged diff, `pre-push` over the pushed
+range):
 
 ```bash
 shiplock scan
@@ -85,10 +91,10 @@ internal-reference patterns, project code-names, home paths, and personal
 emails you declare. shiplock ships no rules of its own: rules about you live
 in one file per machine (`~/.config/shiplock/rules.toml`), read in every repo;
 a repo's own rules in a gitignored `shiplock.local.toml`; and patterns that
-name nothing private in `shiplock.toml`. `shiplock scan --staged` and
-`shiplock scan --range` run the same rules over the staged diff and a commit
-range, for pre-commit and pre-push hooks. Private labels and matched values
-are masked in the output, so a code-name never echoes into a CI log.
+name nothing private in `shiplock.toml`. `shiplock rules add` writes them
+and `shiplock rules suggest` lists the folders the repo already ignores, so
+nobody writes TOML or a regex. Private labels and matched values are masked
+in the output, so a code-name never echoes into a CI log.
 
 Print the audit prompt with:
 

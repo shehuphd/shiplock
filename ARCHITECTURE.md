@@ -65,6 +65,9 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
 | A check finds a docs-vs-code disagreement | `Finding` on stdout; exit 1 |
 | A check's prerequisite is absent (no git tag, package won't import, glob matches nothing) | `Notice` on stderr naming the reason and fix; the run continues, and a skip is never a silent pass |
 | A rules file is missing, unreadable, or holds an unknown key or a bad regex | A `Notice` naming the file; the rest of the rules still apply. A rules file that git tracks is a `Finding` |
+| `rules add` targets a rules file with hand-written comments | `RulesFileError` naming the file, exit 2; the entry to add is printed, and `--rewrite` overrides |
+| A hook can't find shiplock (the interpreter moved, nothing on PATH) | The hook exits 1 with a message naming the fix and `--no-verify`; the commit or push is blocked rather than let through unchecked |
+| `rules push-secret` without `gh`, or `gh` not logged in | One sentence on stderr, exit 2; the rules never leave the machine |
 | `scan --range` gets a range git can't resolve | A `Notice`; nothing is scanned, and the hook that passed it sees exit 0, so the hook script is what must pass a valid range |
 | A swept file is unreadable or not valid UTF-8 | Read leniently or skipped by `_read_text`; ASCII patterns still match |
 | The CI audit dies mid-run | The fallback key's attempt continues from the audit's progress log where the interrupted adapter could write one (Claude, Codex); a Gemini primary has no write tool, so its fallback restarts. A missing verdict line fails closed |
@@ -101,6 +104,10 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
   which a fork's pull request can't read.
 - `scan --range` reads each commit's diff against its first parent, so a
   merge commit's own conflict resolution isn't scanned.
+- The hooks `init` writes are POSIX `sh` scripts; on Windows they need Git
+  for Windows' shell, which git uses for hooks anyway.
+- `rules suggest` sees only ignored folders that exist on the current
+  machine, since git reports what's present.
 
 ## Project structure
 
@@ -108,13 +115,17 @@ stderr, and exits 0 clean, 1 findings, 2 config or usage error.
 shiplock/
 ├── src/shiplock/
 │   ├── __init__.py       # public API re-exports and __version__
-│   ├── cli.py            # command-line entry point (check, scan, prompt, needs-import)
+│   ├── cli.py            # command-line entry point (check, scan, init, rules, prompt, needs-import)
+│   ├── __main__.py       # python -m shiplock, the form the git hooks use
 │   ├── _compat.py        # version-guarded imports (tomllib), defined once
 │   ├── _config.py        # shiplock.toml loader and typed config model
 │   ├── _checks.py        # the twelve checks and the runner
 │   ├── _report.py        # Finding, Notice, Report result types
 │   ├── _style.py         # the banned-word list and matcher
-│   ├── _scan.py          # the leak & internal-reference scan over tracked files
+│   ├── _scan.py          # the rules loader and the leak & internal-reference scan
+│   ├── _rules.py         # the rules-file editor: writer, pattern builders, merge, the CI secret
+│   ├── _suggest.py       # suggested rules from the repo's ignored folders and files
+│   ├── _init.py          # shiplock init: starter config, rules file, .gitignore line, git hooks
 │   ├── _introspect.py    # subprocess introspection bound to the checked root
 │   ├── py.typed          # PEP 561 marker
 │   └── prompts/
@@ -160,13 +171,17 @@ shiplock check
 
 | Module | Responsibility |
 |---|---|
-| `cli` | Parses arguments, dispatches `check`, `scan`, `prompt`, and `needs-import`, renders the report, owns the exit-code contract. Greets a bare invocation, translates argparse errors into sentences with fuzzy command suggestions, and colors the finding/clean categories on a tty (`NO_COLOR` honored). |
+| `cli` | Parses arguments, dispatches `check`, `scan`, `init`, `rules`, `prompt`, and `needs-import`, renders the report, owns the exit-code contract. Greets a bare invocation, translates argparse errors into sentences with fuzzy command suggestions, and colors the finding/clean categories on a tty (`NO_COLOR` honored). |
 | `_compat` | Version-guarded imports in one place: `tomllib` from the standard library on 3.11+, the `tomli` backport on 3.10. |
 | `_config` | Reads `shiplock.toml`, validates it, and returns a frozen `Config` of typed sections. Raises `ConfigError` on an unknown top-level section, a wrong-typed value, or a section missing a required field. |
 | `_checks` | Holds the twelve check functions and `run_checks`, which calls them in a fixed order and folds their output into one report. |
 | `_report` | Defines `Finding` (a disagreement), `Notice` (a skip or a warning, with its reason), and `Report` (both, plus `ok`). |
 | `_style` | The word-boundary banned-word matcher over the words a repo declares in `[style].banned`. Ships no word list. |
 | `_scan` | Loads the rules (the user's per-machine file, committed `[scan].refs`, gitignored repo rules files, `--rules` files), then runs the leak & internal-reference scan in one of three modes: the git-tracked set, the staged diff, or a commit range's added lines and messages. One line scanner serves all three: ref patterns, the identity classes, path-scoped `allow` with masked counts, and an opt-in secret switch. |
+| `_rules` | Edits rules files without hand-written TOML: a writer for shiplock's own five-key layout that refuses to drop a person's comments unless told to rewrite, the `folder` and `file` pattern builders, the merge of several files into one document, and `push-secret`, which hands that document to `gh secret set` on stdin only. |
+| `_suggest` | Lists the folders git ignores in a repo (via `git ls-files --ignored`, filtered through `git check-ignore` so a folder collapsed for having only ignored contents isn't listed) and the files a `.gitignore` line names outright, minus a curated tuple of tool-output names and anything an existing rule covers, with how many tracked files name each. Writes nothing. |
+| `_init` | `shiplock init`: writes a starter `shiplock.toml` from the detected docs, an empty rules file, the `.gitignore` line, and the `pre-commit` and `pre-push` hooks, each carrying the absolute interpreter path with a PATH fallback and a fail-closed branch. Never overwrites; leaves a `core.hooksPath` set outside the repo alone and prints the lines to add. |
+| `__main__` | `python -m shiplock`, so a hook can run the installed copy through its interpreter without that interpreter's `bin` on PATH. |
 | `_introspect` | Reads a package's `__version__`, `__all__`, enum members, and callable signatures in a subprocess that binds `sys.path` to the checked root, so `version` and `coverage` never read a stale installed copy. |
 
 ## The check registry
@@ -263,7 +278,9 @@ Tests are adversarial-first (failing cases before happy paths). A committed
 mutation check (`scripts/mutation_check.py`, run by the CI `mutation` job) breaks
 each check in turn and confirms its own test fails, so a test that guards nothing
 can't pass unnoticed. The gate workflow's shell orchestration is tested too:
-`tests/test_gate.py` extracts the audit job's step scripts from `gate.yml`
+`tests/test_init.py` runs the installed hooks under `sh` against a staged
+and a pushed leak, including the fail-closed branch with the interpreter path
+gone. `tests/test_gate.py` extracts the audit job's step scripts from `gate.yml`
 itself and runs them against stub agent CLIs, covering key validation, the
 missing-key skip, the cross-provider failover continuation, and the
 rates-priced usage table, plus the `check` job's `SHIPLOCK_RULES` step.

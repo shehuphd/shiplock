@@ -425,3 +425,178 @@ def test_user_rules_info_renders_as_info(tmp_path, write_file, monkeypatch, caps
     err = capsys.readouterr().err
     assert "scan info — 1 rule(s) from the user rules file" in err
     assert "skipped" not in err.split("scan info")[1].split("\n")[0]
+
+
+# --------------------------------------------------------------------------
+# init and rules
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def user_home(tmp_path, monkeypatch):
+    """A temp user rules location, and git config isolated from the developer's."""
+    monkeypatch.delenv("SHIPLOCK_NO_USER_RULES", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    empty = tmp_path / "empty-gitconfig"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    return tmp_path / "xdg" / "shiplock" / "rules.toml"
+
+
+def test_init_sets_a_repo_up_and_suggests(tmp_path, write_file, user_home, capsys):
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "README.md", "see drafts/ here\n")
+    write_file(repo, ".gitignore", "drafts/\n")
+    write_file(repo, "drafts/x", "y")
+    assert main(["init", str(repo)]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "shiplock.toml: written (README.md)" in out
+    assert "pre-commit hook: installed" in out
+    assert "drafts/" in out and "shiplock rules add folder drafts/" in out
+    assert (repo / "shiplock.local.toml").is_file()
+
+
+def test_init_on_a_missing_path_is_a_usage_error(tmp_path, capsys):
+    assert main(["init", str(tmp_path / "nope")]) == EXIT_USAGE
+    assert "isn't a directory" in capsys.readouterr().err
+
+
+def test_rules_add_writes_person_rules_to_the_user_file(tmp_path, write_file, user_home, capsys):
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "README.md", "x\n")
+    assert main(["rules", "--path", str(repo), "add", "code-name", "bluebird", "kestrel"]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "added code-name b*******" in out and "added code-name k******" in out
+    assert "bluebird" not in out
+    assert user_home.is_file()
+    assert "bluebird" in user_home.read_text(encoding="utf-8")
+    assert not (repo / "shiplock.local.toml").exists()
+
+
+def test_rules_add_folder_and_file_go_to_the_repo_file(tmp_path, write_file, user_home, capsys):
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "README.md", "x\n")
+    assert main(["rules", "--path", str(repo), "add", "folder", "drafts/"]) == EXIT_OK
+    assert main(["rules", "--path", str(repo), "add", "file", "NOTES.md", "--user"]) == EXIT_OK
+    local = (repo / "shiplock.local.toml").read_text(encoding="utf-8")
+    assert "drafts/" in local and "NOTES.md" not in local
+    assert "NOTES.md" in user_home.read_text(encoding="utf-8")
+
+
+def test_rules_add_then_scan_fires(tmp_path, write_file, user_home, capsys):
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "README.md", "ship the bluebird build\n")
+    main(["rules", "--path", str(repo), "add", "code-name", "bluebird"])
+    capsys.readouterr()
+    assert main(["scan", str(repo)]) == EXIT_FINDINGS
+    assert "internal code-name (b*******)" in capsys.readouterr().out
+
+
+def test_rules_allow_with_paths_and_remove(tmp_path, write_file, user_home, capsys):
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "README.md", "x\n")
+    assert main(["rules", "--path", str(repo), "allow", "ada@personal.example", "--in", "README.md", "--in", "docs/"]) == EXIT_OK
+    assert "allow a******************* in README.md, docs/" in capsys.readouterr().out
+    local = (repo / "shiplock.local.toml").read_text(encoding="utf-8")
+    assert "paths = ['README.md', 'docs/']" in local
+    assert main(["rules", "--path", str(repo), "remove", "allow", "ada@personal.example"]) == EXIT_OK
+    assert "removed allow" in capsys.readouterr().out
+    assert main(["rules", "--path", str(repo), "remove", "allow", "ada@personal.example"]) == EXIT_OK
+    assert "no allow" in capsys.readouterr().out
+
+
+def test_rules_add_refuses_a_commented_file_unless_rewrite(tmp_path, write_file, user_home, capsys):
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "README.md", "x\n")
+    write_file(repo, "shiplock.local.toml", "# hand-written\ncode_names = []\n")
+    assert main(["rules", "--path", str(repo), "add", "folder", "drafts"]) == EXIT_USAGE
+    assert "--rewrite" in capsys.readouterr().err
+    assert main(["rules", "--path", str(repo), "add", "folder", "drafts", "--rewrite"]) == EXIT_OK
+
+
+def test_rules_add_ref_needs_one_value_and_a_pattern(tmp_path, write_file, user_home, capsys):
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "README.md", "x\n")
+    assert main(["rules", "--path", str(repo), "add", "ref", "a", "b", "--pattern", "x"]) == EXIT_USAGE
+    assert main(["rules", "--path", str(repo), "add", "ref", "a"]) == EXIT_USAGE
+    assert main(["rules", "--path", str(repo), "add", "ref", "ticket", "--pattern", r"ACME-\d+"]) == EXIT_OK
+
+
+def test_rules_list_masks_unless_unmask(tmp_path, write_file, user_home, capsys):
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "README.md", "x\n")
+    main(["rules", "--path", str(repo), "add", "code-name", "bluebird"])
+    main(["rules", "--path", str(repo), "allow", "bluebird", "--in", "README.md"])
+    capsys.readouterr()
+    assert main(["rules", "--path", str(repo), "list"]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert str(user_home) in out and "b*******" in out and "bluebird" not in out
+    assert "allow      b******* in README.md" in out
+    main(["rules", "--path", str(repo), "list", "--unmask"])
+    assert "code-name  bluebird" in capsys.readouterr().out
+
+
+def test_rules_suggest_prints_the_suggestions(tmp_path, write_file, user_home, capsys):
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "README.md", "x\n")
+    write_file(repo, ".gitignore", "drafts/\n")
+    write_file(repo, "drafts/x", "y")
+    assert main(["rules", "--path", str(repo), "suggest"]) == EXIT_OK
+    assert "drafts/" in capsys.readouterr().out
+
+
+def test_rules_push_secret_merges_and_calls_gh(tmp_path, write_file, user_home, monkeypatch, capsys):
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "README.md", "x\n")
+    main(["rules", "--path", str(repo), "add", "code-name", "bluebird"])
+    main(["rules", "--path", str(repo), "allow", "bluebird"])
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "gh.log"
+    gh = bin_dir / "gh"
+    gh.write_text(f'#!/bin/sh\nprintf "argv:%s\\n" "$*" > "{log}"\ncat >> "{log}"\n', encoding="utf-8")
+    gh.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:/usr/bin:/bin")
+    capsys.readouterr()
+    assert main(["rules", "--path", str(repo), "push-secret"]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "SHIPLOCK_RULES set with 1 code names, 1 allow" in out
+    assert "shared repo" in out and "bluebird" not in out
+    logged = log.read_text(encoding="utf-8")
+    assert logged.startswith("argv:secret set SHIPLOCK_RULES\n")
+    assert "bluebird" in logged
+
+    capsys.readouterr()
+    assert main(["rules", "--path", str(repo), "push-secret", "--repo-only"]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "1 allow" in out and "code names" not in out and "shared repo" not in out
+
+
+def test_rules_push_secret_with_nothing_to_push(tmp_path, write_file, user_home, capsys):
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "README.md", "x\n")
+    assert main(["rules", "--path", str(repo), "push-secret"]) == EXIT_USAGE
+    assert "no rules to push" in capsys.readouterr().err
+
+
+def test_rules_add_to_user_file_when_it_is_turned_off_is_an_error(tmp_path, write_file, capsys):
+    repo = tmp_path / "repo"
+    _init_git(repo, write_file, "README.md", "x\n")
+    assert main(["rules", "--path", str(repo), "add", "code-name", "x"]) == EXIT_USAGE
+    assert "SHIPLOCK_NO_USER_RULES" in capsys.readouterr().err
+    assert main(["rules", "--path", str(repo), "add", "code-name", "x", "--repo"]) == EXIT_OK
+
+
+def test_python_dash_m_runs_the_cli():
+    import subprocess
+    import sys
+
+    proc = subprocess.run([sys.executable, "-m", "shiplock", "--version"], capture_output=True, text=True)
+    assert proc.returncode == 0 and proc.stdout.startswith("shiplock ")
+
+
+def test_mistyped_command_suggests_init_and_rules(capsys):
+    with pytest.raises(SystemExit):
+        main(["rulez"])
+    assert "Perhaps you meant 'shiplock rules'" in capsys.readouterr().err

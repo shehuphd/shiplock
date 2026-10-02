@@ -1,4 +1,4 @@
-"""Command-line entry point: ``shiplock check``, ``shiplock scan``, ``shiplock prompt``, and ``shiplock needs-import``.
+"""Command-line entry point: ``check``, ``scan``, ``init``, ``rules``, ``prompt``, and ``needs-import``.
 
 Exit codes are contractual: 0 clean, 1 a check found a problem, 2 a config or
 usage error. Findings print to stdout (the answer to what was asked); notices
@@ -33,8 +33,9 @@ EXIT_FINDINGS = 1
 EXIT_USAGE = 2
 
 _DESCRIPTION = "Docs-vs-code release checks: deterministic, plus semantic and ablation audit prompts."
-_COMMANDS = ("check", "prompt", "needs-import", "scan")
+_COMMANDS = ("check", "scan", "init", "rules", "prompt", "needs-import")
 _PROMPT_KINDS = ("audit", "ablation")
+_RULE_KINDS = ("code-name", "email", "username", "ref", "folder", "file")
 
 _RED = "\033[31m"
 _GREEN = "\033[32m"
@@ -105,6 +106,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "needs-import":
         return _cmd_needs_import(Path(args.path))
+    if args.command == "init":
+        return _cmd_init(Path(args.path), hooks=not args.no_hooks)
+    if args.command == "rules":
+        return _cmd_rules(args)
     return _cmd_prompt(args.kind)
 
 
@@ -182,6 +187,48 @@ def _build_parser() -> argparse.ArgumentParser:
         help="scan the added lines of the staged diff instead of the tracked "
         "files; what a pre-commit hook checks",
     )
+
+    init = sub.add_parser(
+        "init",
+        help="set a repo up: starter config, rules file, .gitignore line, git hooks",
+        allow_abbrev=False,
+    )
+    init.add_argument("path", nargs="?", default=".", help="repo to set up (default: the current directory)")
+    init.add_argument("--no-hooks", action="store_true", help="skip installing the pre-commit and pre-push hooks")
+
+    rules = sub.add_parser(
+        "rules",
+        help="edit the rules files: add, allow, remove, list, suggest, push-secret",
+        allow_abbrev=False,
+    )
+    rules.add_argument("--path", default=".", metavar="REPO", help="the repo (default: the current directory)")
+    rsub = rules.add_subparsers(dest="rules_command", required=True, parser_class=_Parser)
+
+    add = rsub.add_parser("add", help="add a rule", allow_abbrev=False)
+    add.add_argument("kind", choices=_RULE_KINDS, help="what the value is")
+    add.add_argument("values", nargs="+", metavar="VALUE", help="one or more values")
+    add.add_argument("--pattern", help="the regex, for kind 'ref' only")
+    _target_flags(add)
+
+    allow = rsub.add_parser("allow", help="allow a value this repo contains on purpose", allow_abbrev=False)
+    allow.add_argument("value", help="a code-name, username, email, or pattern label")
+    allow.add_argument("--in", dest="paths", action="append", default=[], metavar="PATH",
+                       help="a repo-relative path or glob it's allowed in (repeatable); omit for anywhere")
+    _target_flags(allow)
+
+    remove = rsub.add_parser("remove", help="remove a rule from whichever file holds it", allow_abbrev=False)
+    remove.add_argument("kind", choices=_RULE_KINDS + ("allow",), help="what the value is")
+    remove.add_argument("value")
+    remove.add_argument("--rewrite", action="store_true", help="rewrite a file even if it holds hand-written comments")
+
+    listing = rsub.add_parser("list", help="show the rules in force, masked", allow_abbrev=False)
+    listing.add_argument("--unmask", action="store_true", help="print values in full")
+
+    rsub.add_parser("suggest", help="list ignored folders and files no rule covers", allow_abbrev=False)
+
+    push = rsub.add_parser("push-secret", help="store the merged rules as the repo's SHIPLOCK_RULES secret through gh", allow_abbrev=False)
+    push.add_argument("--repo-only", action="store_true", help="send only this repo's rules file, not the user file")
+    push.add_argument("--rules", action="append", default=[], metavar="PATH", help="an extra rules file to include (repeatable)")
 
     prompt = sub.add_parser(
         "prompt",
@@ -300,6 +347,171 @@ def _cmd_scan(
     return EXIT_FINDINGS if not report.ok else EXIT_OK
 
 
+def _target_flags(parser: argparse.ArgumentParser) -> None:
+    where = parser.add_mutually_exclusive_group()
+    where.add_argument("--user", dest="to_user", action="store_true", default=None,
+                       help="write to your user rules file")
+    where.add_argument("--repo", dest="to_user", action="store_false",
+                       help="write to this repo's rules file")
+    parser.add_argument("--rewrite", action="store_true",
+                        help="rewrite a file even if it holds hand-written comments")
+
+
+def _cmd_init(root: Path, hooks: bool = True) -> int:
+    """Set a repo up in one command; never overwrites, never prompts."""
+    from shiplock._init import run_init
+    from shiplock._suggest import render, suggest
+
+    if not root.is_dir():
+        print(f"shiplock: '{root}' isn't a directory. Point init at a repo root.", file=sys.stderr)
+        return EXIT_USAGE
+    result = run_init(root, hooks=hooks)
+    for line in result.lines:
+        print(f"shiplock init: {line}")
+    config = _config_for(root)
+    if config is not None:
+        print()
+        sys.stdout.write(render(suggest(config)))
+    print()
+    print("Next: add the names to keep out with 'shiplock rules add code-name NAME',")
+    print("'shiplock rules add email ADDRESS', or 'shiplock rules add folder DIR/'.")
+    return EXIT_OK
+
+
+def _config_for(root: Path):
+    root = root.resolve()
+    try:
+        return load_config(root) if (root / CONFIG_FILENAME).is_file() else default_config(root)
+    except ConfigError as exc:
+        print(f"shiplock: {exc}", file=sys.stderr)
+        return None
+
+
+def _cmd_rules(args: argparse.Namespace) -> int:
+    """Edit the rules files without hand-written TOML."""
+    from shiplock import _rules
+    from shiplock._rules import RulesFileError
+
+    root = Path(args.path).resolve()
+    config = _config_for(root)
+    if config is None and (root / CONFIG_FILENAME).is_file():
+        return EXIT_USAGE
+    try:
+        if args.rules_command == "add":
+            return _rules_add(args, root, config)
+        if args.rules_command == "allow":
+            path = _rules.target_path("allow", root, config, args.to_user)
+            rules = _rules.load_rules_file(path)
+            line = _rules.allow_entry(rules, args.value, args.paths)
+            _rules.save(rules, rewrite=args.rewrite)
+            print(f"shiplock rules: {line} ({path})")
+            return EXIT_OK
+        if args.rules_command == "remove":
+            return _rules_remove(args, root, config)
+        if args.rules_command == "list":
+            return _rules_list(args, root, config)
+        if args.rules_command == "suggest":
+            from shiplock._suggest import render, suggest
+
+            if config is None:
+                return EXIT_USAGE
+            sys.stdout.write(render(suggest(config)))
+            return EXIT_OK
+        return _rules_push_secret(args, root, config)
+    except RulesFileError as exc:
+        print(f"shiplock: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+
+
+def _rules_add(args: argparse.Namespace, root: Path, config) -> int:
+    from shiplock import _rules
+
+    if args.kind == "ref" and len(args.values) > 1:
+        print("shiplock: a ref takes one label and one --pattern; add them one at a time.", file=sys.stderr)
+        return EXIT_USAGE
+    path = _rules.target_path(args.kind, root, config, args.to_user)
+    rules = _rules.load_rules_file(path)
+    lines = [_rules.add_rule(rules, args.kind, value, args.pattern) for value in args.values]
+    _rules.save(rules, rewrite=args.rewrite)
+    for line in lines:
+        print(f"shiplock rules: added {line} ({path})")
+    return EXIT_OK
+
+
+def _rules_remove(args: argparse.Namespace, root: Path, config) -> int:
+    from shiplock import _rules
+
+    removed = False
+    for path in _rules_paths(root, config):
+        if not path.is_file():
+            continue
+        rules = _rules.load_rules_file(path)
+        if _rules.remove_rule(rules, args.kind, args.value):
+            _rules.save(rules, rewrite=args.rewrite)
+            print(f"shiplock rules: removed {args.kind} {_rules.mask(args.value)} ({path})")
+            removed = True
+    if not removed:
+        print(f"shiplock rules: no {args.kind} {_rules.mask(args.value)} in any rules file")
+    return EXIT_OK
+
+
+def _rules_paths(root: Path, config) -> list[Path]:
+    from shiplock import _rules
+    from shiplock._scan import user_rules_path
+
+    out: list[Path] = []
+    user, _ = user_rules_path()
+    if user is not None:
+        out.append(user)
+    out.append(_rules.repo_rules_path(root, config))
+    return out
+
+
+def _rules_list(args: argparse.Namespace, root: Path, config) -> int:
+    from shiplock import _rules
+
+    show = (lambda v: v) if args.unmask else _rules.mask
+    for path in _rules_paths(root, config):
+        print(f"{path}{'' if path.is_file() else ' (absent)'}")
+        if not path.is_file():
+            continue
+        rules = _rules.load_rules_file(path)
+        for label, _ in rules.refs:
+            print(f"  ref        {show(label)}")
+        for key, kind in (("code_names", "code-name"), ("home_usernames", "username"), ("emails", "email")):
+            for value in getattr(rules, key):
+                print(f"  {kind:<10} {show(value)}")
+        for value, scope in rules.allow:
+            where = f" in {', '.join(scope)}" if scope else ""
+            print(f"  allow      {show(value)}{where}")
+        if rules.is_empty():
+            print("  (no rules)")
+    return EXIT_OK
+
+
+def _rules_push_secret(args: argparse.Namespace, root: Path, config) -> int:
+    from shiplock import _rules
+
+    paths = [] if args.repo_only else _rules_paths(root, config)[:-1]
+    paths.append(_rules.repo_rules_path(root, config))
+    paths.extend(Path(p).expanduser() for p in args.rules)
+    files = [_rules.load_rules_file(p) for p in paths if p.is_file()]
+    merged = _rules.merge(files)
+    if merged.is_empty():
+        print("shiplock: no rules to push; the rules files are empty or absent.", file=sys.stderr)
+        return EXIT_USAGE
+    failure = _rules.push_secret(root, _rules.render(merged))
+    if failure:
+        print(f"shiplock: {failure}", file=sys.stderr)
+        return EXIT_USAGE
+    counts = ", ".join(f"{n} {key.replace('_', ' ')}" for key, n in merged.counts().items() if n)
+    print(f"shiplock rules: {_rules.SECRET_NAME} set with {counts}.")
+    print("The secret is a copy: rerun this after changing any rules file.")
+    if not args.repo_only:
+        print(_rules.shared_repo_caution())
+    return EXIT_OK
+
+
 def _cmd_needs_import(root: Path) -> int:
     """Print ``true`` or ``false``: does this repo's config need the package?
 
@@ -394,6 +606,8 @@ def _print_welcome() -> None:
     print("  shiplock check path/to/repo   check any repo, no setup needed")
     print("  shiplock check                check the current directory")
     print("  shiplock scan                 scan tracked files for leaks and internal refs")
+    print("  shiplock init                 set a repo up: config, rules file, git hooks")
+    print("  shiplock rules add ...        add a code-name, email, folder, or file to keep out")
     print("  shiplock prompt               print the semantic audit prompt")
     print("  shiplock prompt ablation      print the advisory ablation prompt")
     print("  shiplock needs-import         does this repo's config need it installed?")

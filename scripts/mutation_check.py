@@ -24,6 +24,9 @@ ROOT = Path(__file__).resolve().parent.parent
 CHECKS = ROOT / "src" / "shiplock" / "_checks.py"
 STYLE = ROOT / "src" / "shiplock" / "_style.py"
 SCAN = ROOT / "src" / "shiplock" / "_scan.py"
+INIT = ROOT / "src" / "shiplock" / "_init.py"
+RULES = ROOT / "src" / "shiplock" / "_rules.py"
+SUGGEST = ROOT / "src" / "shiplock" / "_suggest.py"
 PYTEST = [sys.executable, "-m", "pytest", "-q", "-p", "no:randomly"]
 
 # (file, anchor, mutated, test node). Each anchor must appear once.
@@ -100,6 +103,24 @@ MUTATIONS = [
     (CHECKS, "    return run_scan(config, config.scan or default_scan_config())",
      '    return run_scan(config, config.scan) if config.scan else ([], [])',
      "tests/test_scan.py::test_check_scan_runs_without_section_when_a_rules_file_exists"),
+    (INIT, "    if path.exists():\n        return (",
+     "    if False:\n        return (",
+     "tests/test_init.py::test_init_is_idempotent_and_never_overwrites"),
+    (INIT, "        if local.returncode != 0:",
+     "        if False:",
+     "tests/test_init.py::test_init_never_writes_into_a_shared_hooks_path"),
+    (INIT, "    return 1\n  fi",
+     "    return 0\n  fi",
+     "tests/test_init.py::test_hook_fails_closed_when_shiplock_cannot_be_found"),
+    (RULES, "        if has_foreign_comments(text):",
+     "        if False:",
+     "tests/test_rules.py::test_save_refuses_to_drop_a_persons_comments_unless_rewrite"),
+    (RULES, '            ["gh", "secret", "set", SECRET_NAME],\n            input=document,',
+     '            ["gh", "secret", "set", SECRET_NAME, document],\n            input="",',
+     "tests/test_rules.py::test_push_secret_sends_the_document_on_stdin_only"),
+    (SUGGEST, "        if _is_tool_dir(name):\n            continue",
+     "        if False:\n            continue",
+     "tests/test_suggest.py::test_suggests_ignored_folders_with_mention_counts"),
     (CHECKS, "    if not banned:",
      "    if False:",
      "tests/test_checks.py::test_banned_words_skips_when_no_words_declared"),
@@ -107,7 +128,7 @@ MUTATIONS = [
 
 
 def main() -> int:
-    originals = {path: path.read_text() for path in (CHECKS, STYLE, SCAN)}
+    originals = {path: path.read_text() for path in (CHECKS, STYLE, SCAN, INIT, RULES, SUGGEST)}
     all_caught = True
     try:
         for path, anchor, mutated, node in MUTATIONS:
