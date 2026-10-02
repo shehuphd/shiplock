@@ -298,6 +298,9 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length) or b"{}")
+        # Record before responding: the client returns as soon as it reads the
+        # response, so a request recorded afterwards races the test's count.
+        self.server.seen.append((self.headers.get("Authorization"), body))
         status, payload, headers = self.script.pop(0) if self.script else (200, None, {})
         if payload is None:
             payload = {"model": body.get("model"), "answers": {q: {"type": "noul", "noul": 0.9} for q in body.get("questions", {})}, "usage": {"input_tokens": 12}}
@@ -309,7 +312,6 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(data)
-        self.server.seen.append((self.headers.get("Authorization"), body))
 
     def log_message(self, *args):
         pass
